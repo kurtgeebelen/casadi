@@ -41,6 +41,8 @@ namespace CasADi{
   class Integrator;
   class QPSolver;
   class ImplicitFunction;
+  class InputIndex;
+  class OutputIndex;
   
   /// Function pointer to a nonlinear solver creator function
   typedef NLPSolver (*NLPSolverCreator)(const FX& F, const FX& G, const FX& H, const FX& J);
@@ -58,10 +60,10 @@ namespace CasADi{
   typedef ImplicitFunction (*implicitFunctionCreator)(const FX& f);
   
   /// Function pointer to a Jacobian generator function
-  typedef FX (*JacobianGenerator)(FX& fcn, int iind, int oind, void* user_data);
+  typedef FX (*JacobianGenerator)(FX& fcn, const InputIndex iind, const OutputIndex oind, void* user_data);
   
   /// Function pointer to a sparsity generator function
-  typedef CRSSparsity (*SparsityGenerator)(FX& fcn, int iind, int oind, void* user_data);
+  typedef CRSSparsity (*SparsityGenerator)(FX& fcn, const InputIndex iind, const OutputIndex oind, void* user_data);
   
 #ifndef SWIG
   // The number of derivative directions for which the tool has been optimized

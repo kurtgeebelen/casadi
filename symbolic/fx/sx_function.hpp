@@ -108,13 +108,13 @@ public:
   *
   * \see CasADi::Jacobian for an AD approach
   */
-  SXMatrix jac(int iind=0, int oind=0, bool compact=false, bool symmetric=false);
+  SXMatrix jac(const InputIndex iind=0, const OutputIndex oind=0, bool compact=false, bool symmetric=false);
 
   /// Gradient via source code transformation
-  SXMatrix grad(int iind=0, int oind=0);
+  SXMatrix grad(const InputIndex iind=0, const OutputIndex oind=0);
   
   /// Hessian (forward over adjoint) via source code transformation
-  SXMatrix hess(int iind=0, int oind=0);
+  SXMatrix hess(const InputIndex iind=0, const OutputIndex oind=0);
   
   /// Check if the node is pointing to the right type of object
   virtual bool checkNode() const;

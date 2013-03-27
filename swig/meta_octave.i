@@ -259,5 +259,44 @@ int meta< CasADi::MX >::as(const octave_value& p,CasADi::MX &m) {
 }
 
 meta_vector(CasADi::MX);
+
+/// InputIndex
+template<> char meta< CasADi::InputIndex >::expected_message[] = "Expecting integer or string";
+
+template <> bool meta< CasADi::InputIndex >::couldbe(const octave_value& p) {
+    if (p.is_string()) return true;
+    int res = SWIG_AsVal_int(p, NULL);
+    return SWIG_CheckState(res);
+}
+
+template <> int meta< CasADi::InputIndex >::as(const octave_value& p, CasADi::InputIndex &m) {
+    if (p.is_string()) {
+      m = CasADi::InputIndex(p.string_value());
+    } else {
+      int i;
+      int ret = SWIG_AsVal_int(p, &i);
+      m = CasADi::InputIndex(i);
+    }
+}
+
+/// OutputIndex
+template<> char meta< CasADi::OutputIndex >::expected_message[] = "Expecting integer or string";
+
+template <> bool meta< CasADi::OutputIndex >::couldbe(const octave_value& p) {
+    if (p.is_string()) return true;
+    int res = SWIG_AsVal_int(p, NULL);
+    return SWIG_CheckState(res);
+}
+
+template <> int meta< CasADi::OutputIndex >::as(const octave_value& p, CasADi::OutputIndex &m) {
+    if (p.is_string()) {
+      m = CasADi::OutputIndex(p.string_value());
+    } else {
+      int i;
+      int ret = SWIG_AsVal_int(p, &i);
+      m = CasADi::OutputIndex(i);
+    }
+}
+
 %}
 

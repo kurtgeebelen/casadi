@@ -357,4 +357,21 @@ C=DMatrix(B)
 
 assert(C.size(),2*7)
 
+x = msym("x")
+p = msym("p")
+
+f = MXFunction(daeIn("x",x,"p",p),daeOut("ode",x*p))
+f.init()
+
+integrator = CVodesIntegrator(f);
+integrator.init();
+integrator.setInput(2,"x0");
+
+integrator.setOutput(7,"xf");
+
+
+
+assert(integrator.output(INTEGRATOR_XF)(1).toScalar()==7)
+assert(integrator.input(INTEGRATOR_X0)(1).toScalar()==2)
+
 disp('All was fine')

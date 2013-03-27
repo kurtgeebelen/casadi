@@ -127,10 +127,10 @@ public:
   virtual bool checkNode() const;
   
   /** \brief Jacobian via source code transformation */
-  MX jac(int iind=0, int oind=0, bool compact=false, bool symmetric=false);
+  MX jac(const InputIndex iind=0, const OutputIndex oind=0, bool compact=false, bool symmetric=false);
 
   /** \brief Gradient via source code transformation */
-  MX grad(int iind=0, int oind=0);
+  MX grad(const InputIndex iind=0, const OutputIndex oind=0);
   
   /** \brief Expand the matrix valued graph into a scalar valued graph */
   SXFunction expand(const std::vector<SXMatrix>& inputv = std::vector<SXMatrix>());

@@ -88,16 +88,16 @@ bool SXFunction::checkNode() const{
   return dynamic_cast<const SXFunctionInternal*>(get())!=0;
 }
 
-SXMatrix SXFunction::jac(int iind, int oind, bool compact, bool symmetric){
-  return (*this)->jac(iind,oind,compact,symmetric);
+SXMatrix SXFunction::jac(const InputIndex iind, const OutputIndex oind, bool compact, bool symmetric){
+  return (*this)->jac(iind(this),oind(this),compact,symmetric);
 }
 
-SXMatrix SXFunction::grad(int iind, int oind){
-  return (*this)->grad(iind,oind);
+SXMatrix SXFunction::grad(const InputIndex iind, const OutputIndex oind){
+  return (*this)->grad(iind(this),oind(this));
 }
 
-SXMatrix SXFunction::hess(int iind, int oind){
-  return (*this)->hess(iind,oind);
+SXMatrix SXFunction::hess(const InputIndex iind, const OutputIndex oind){
+  return (*this)->hess(iind(this),oind(this));
 }
 
 const SXMatrix& SXFunction::inputExpr(int ind) const{
