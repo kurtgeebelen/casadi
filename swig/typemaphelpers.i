@@ -227,6 +227,19 @@ class meta {
 
 %enddef
 
+%define %my_generic_typemap(Precedence,Type...) 
+%typemap(in) const Type (Type m) {
+  bool result=meta< Type >::as($input,m);
+  if (!result)
+    SWIG_exception_fail(SWIG_TypeError,meta< Type >::expected_message);
+  $1 = m;
+}
+
+%typemap(typecheck,precedence=Precedence) const Type { $1 = meta< Type >::isa($input) || meta< Type >::couldbe($input); }
+%typemap(freearg) const Type {}
+
+%enddef
+
 // Create an output typemap for a const ref such that a copy is made
 %define %outputConstRefCopy(Type)
 %typemap(out) const Type & {

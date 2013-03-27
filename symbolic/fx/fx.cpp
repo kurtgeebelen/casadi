@@ -31,6 +31,29 @@
 using namespace std;
 
 namespace CasADi{
+
+
+InputIndex::InputIndex(int i) : i_(i), string_(false) {}
+InputIndex::InputIndex(const std::string& name) : name_(name), string_(true) {}
+
+OutputIndex::OutputIndex(int i) : i_(i), string_(false) {}
+OutputIndex::OutputIndex(const std::string& name) : name_(name), string_(true) {}
+
+int InputIndex::operator()(const FX *fx) const {
+  if (string_) {
+    return fx->inputSchemeEntry(name_);
+  } else {
+    return i_;
+  }
+}
+
+int OutputIndex::operator()(const FX *fx) const {
+  if (string_) {
+    return fx->outputSchemeEntry(name_);
+  } else {
+    return i_;
+  }
+}
   
 FX::FX(){
 }
@@ -156,19 +179,19 @@ void FX::setNumOutputs(int num_out){
   return (*this)->setNumOutputs(num_out);  
 }
 
-FX FX::jacobian(int iind, int oind, bool compact, bool symmetric){
+FX FX::jacobian(InputIndex iind, OutputIndex oind, bool compact, bool symmetric){
   assertInit();
-  return (*this)->jacobian(iind,oind,compact,symmetric);
+  return (*this)->jacobian(iind(this),oind(this),compact,symmetric);
 }
 
-FX FX::gradient(int iind, int oind){
+FX FX::gradient(InputIndex iind, OutputIndex oind){
   assertInit();
-  return (*this)->gradient(iind,oind);
+  return (*this)->gradient(iind(this),oind(this));
 }
 
-FX FX::hessian(int iind, int oind){
+FX FX::hessian(InputIndex iind, OutputIndex oind){
   assertInit();
-  return (*this)->hessian(iind,oind);  
+  return (*this)->hessian(iind(this),oind(this));  
 }
 
 FX FX::fullJacobian(){
@@ -180,61 +203,52 @@ bool FX::checkNode() const{
   return dynamic_cast<const FXInternal*>(get())!=0;
 }
 
-Matrix<double>& FX::input(int iind){
-  return (*this)->input(iind);
-}
-
-Matrix<double>& FX::input(const std::string &iname){
-  return (*this)->input(iname);
+Matrix<double>& FX::input(InputIndex iind){
+  return (*this)->input(iind(this));
 }
     
-    
-const Matrix<double>& FX::input(int iind) const{
-  return (*this)->input(iind);
+const Matrix<double>& FX::input(InputIndex iind) const{
+  return (*this)->input(iind(this));
 }
 
-const Matrix<double>& FX::input(const std::string & iname) const{
-  return (*this)->input(iname);
-}
-
-Matrix<double>& FX::output(int oind){
-  return (*this)->output(oind);
+Matrix<double>& FX::output(OutputIndex oind){
+  return (*this)->output(oind(this));
 }
     
-const Matrix<double>& FX::output(int oind) const{
-  return (*this)->output(oind);
+const Matrix<double>& FX::output(OutputIndex oind) const{
+  return (*this)->output(oind(this));
 }
 
-Matrix<double>& FX::fwdSeed(int iind, int dir){
-  return (*this)->fwdSeed(iind,dir);
+Matrix<double>& FX::fwdSeed(InputIndex iind, int dir){
+  return (*this)->fwdSeed(iind(this),dir);
 }
     
-const Matrix<double>& FX::fwdSeed(int iind, int dir) const{
-  return (*this)->fwdSeed(iind,dir);
+const Matrix<double>& FX::fwdSeed(InputIndex iind, int dir) const{
+  return (*this)->fwdSeed(iind(this),dir);
 }
 
-Matrix<double>& FX::fwdSens(int oind, int dir){
-  return (*this)->fwdSens(oind,dir);
+Matrix<double>& FX::fwdSens(OutputIndex oind, int dir){
+  return (*this)->fwdSens(oind(this),dir);
 }
     
-const Matrix<double>& FX::fwdSens(int oind, int dir) const{
-  return (*this)->fwdSens(oind,dir);
+const Matrix<double>& FX::fwdSens(OutputIndex oind, int dir) const{
+  return (*this)->fwdSens(oind(this),dir);
 }
 
-Matrix<double>& FX::adjSeed(int oind, int dir){
-  return (*this)->adjSeed(oind,dir);
+Matrix<double>& FX::adjSeed(OutputIndex oind, int dir){
+  return (*this)->adjSeed(oind(this),dir);
 }
     
-const Matrix<double>& FX::adjSeed(int oind, int dir) const{
-  return (*this)->adjSeed(oind,dir);
+const Matrix<double>& FX::adjSeed(OutputIndex oind, int dir) const{
+  return (*this)->adjSeed(oind(this),dir);
 }
 
-Matrix<double>& FX::adjSens(int iind, int dir){
-  return (*this)->adjSens(iind,dir);
+Matrix<double>& FX::adjSens(InputIndex iind, int dir){
+  return (*this)->adjSens(iind(this),dir);
 }
     
-const Matrix<double>& FX::adjSens(int iind, int dir) const{
-  return (*this)->adjSens(iind,dir);
+const Matrix<double>& FX::adjSens(InputIndex iind, int dir) const{
+  return (*this)->adjSens(iind(this),dir);
 }
 
 void FX::addMonitor(const string& mon){
@@ -253,12 +267,12 @@ GenericType FX::getStat(const string& name) const{
   return (*this)->getStat(name);
 }
 
-CRSSparsity& FX::jacSparsity(int iind, int oind, bool compact, bool symmetric){
-  return (*this)->jacSparsity(iind,oind,compact, symmetric);
+CRSSparsity& FX::jacSparsity(InputIndex iind, OutputIndex oind, bool compact, bool symmetric){
+  return (*this)->jacSparsity(iind(this),oind(this),compact, symmetric);
 }
 
-void FX::setJacSparsity(const CRSSparsity& sp, int iind, int oind, bool compact){
-  (*this)->setJacSparsity(sp,iind,oind,compact);
+void FX::setJacSparsity(const CRSSparsity& sp, InputIndex iind, OutputIndex oind, bool compact){
+  (*this)->setJacSparsity(sp,iind(this),oind(this),compact);
 }
 
 std::vector<MX> FX::symbolicInput() const{
@@ -284,6 +298,14 @@ InputOutputScheme FX::getInputScheme() const {
 
 InputOutputScheme FX::getOutputScheme() const {
   return (*this)->getOutputScheme();
+}
+
+int FX::inputSchemeEntry(const std::string &name) const {
+  return (*this)->inputSchemeEntry(name);
+}
+
+int FX::outputSchemeEntry(const std::string &name) const {
+  return (*this)->outputSchemeEntry(name);
 }
 
 FX FX::operator[](int k) const {

@@ -207,6 +207,45 @@ template <> bool meta< std::string >::couldbe(PyObject * p) {
 
 meta_vector(std::string);
 
+
+/// InputIndex
+template<> char meta< CasADi::InputIndex >::expected_message[] = "Expecting integer or string";
+
+template <> bool meta< CasADi::InputIndex >::couldbe(PyObject * p) {
+    return meta<int>::couldbe(p) || meta<std::string>::couldbe(p);
+}
+
+template <> int meta< CasADi::InputIndex >::as(PyObject * p, CasADi::InputIndex &m) {
+    if (meta<int>::couldbe(p)) {
+      int i;
+      meta<int>::as(p,i);
+      m = CasADi::InputIndex(i);
+    } else {
+      std::string name;
+      meta<std::string>::as(p,name);
+      m = CasADi::InputIndex(name);
+    }
+}
+
+/// OutputIndex
+template<> char meta< CasADi::OutputIndex >::expected_message[] = "Expecting integer or string";
+
+template <> bool meta< CasADi::OutputIndex >::couldbe(PyObject * p) {
+    return meta<int>::couldbe(p) || meta<std::string>::couldbe(p);
+}
+
+template <> int meta< CasADi::OutputIndex >::as(PyObject * p, CasADi::OutputIndex &m) {
+    if (meta<int>::couldbe(p)) {
+      int i;
+      meta<int>::as(p,i);
+      m = CasADi::OutputIndex(i);
+    } else {
+      std::string name;
+      meta<std::string>::as(p,name);
+      m = CasADi::OutputIndex(name);
+    }
+}
+
 // Forward declarations
 template<> int meta< CasADi::GenericType::Dictionary >::as(PyObject * p,CasADi::GenericType::Dictionary &s);
 template<> bool meta< CasADi::GenericType::Dictionary >::couldbe(PyObject * p);

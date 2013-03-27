@@ -138,6 +138,8 @@ if (!ret) {
 
 #ifdef SWIGPYTHON
 %my_generic_const_typemap(SWIG_TYPECHECK_DOUBLE,double);
+%my_generic_typemap(SWIG_TYPECHECK_INTEGER,CasADi::InputIndex);
+%my_generic_typemap(SWIG_TYPECHECK_INTEGER,CasADi::OutputIndex);
 #endif // SWIGPYTHON
 
 %my_generic_const_typemap(PRECEDENCE_DVector,std::vector<double>);

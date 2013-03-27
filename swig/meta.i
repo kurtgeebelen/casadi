@@ -86,6 +86,8 @@ template<> swig_type_info** meta< CasADi::MX >::name = &SWIGTYPE_p_CasADi__MX;
 template<> swig_type_info** meta< std::vector< CasADi::MX> >::name = &SWIGTYPE_p_std__vectorT_CasADi__MX_std__allocatorT_CasADi__MX_t_t;
 	template<> swig_type_info** meta< std::vector< std::vector< CasADi::MX> > >::name = &SWIGTYPE_p_std__vectorT_std__vectorT_CasADi__MX_p_std__allocatorT_CasADi__MX_p_t_t_std__allocatorT_std__vectorT_CasADi__MX_p_std__allocatorT_CasADi__MX_p_t_t_t_t;
 template<> swig_type_info** meta< std::vector<std::string> >::name = &SWIGTYPE_p_std__vectorT_std__string_std__allocatorT_std__string_t_t;
+template<> swig_type_info** meta< CasADi::InputIndex >::name = &SWIGTYPE_p_CasADi__InputIndex;
+template<> swig_type_info** meta< CasADi::OutputIndex >::name = &SWIGTYPE_p_CasADi__OutputIndex;
 %}
 
 

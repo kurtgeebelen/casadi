@@ -50,6 +50,33 @@ struct FunctionIO{
 /** Forward declaration of internal class */
 class FXInternal;
 
+class InputIndex {
+  public:
+#ifndef SWIG
+    InputIndex(int i=0);
+    InputIndex(const std::string &name);
+    int operator()(const FX *fx) const;
+#endif // SWIG
+  private:
+    bool string_;
+    int i_;
+    std::string name_;
+};
+
+class OutputIndex {
+  public:
+#ifndef SWIG
+    OutputIndex(int i=0);
+    OutputIndex(const std::string &name);
+    int operator()(const FX *fx) const;
+#endif // SWIG
+  private:
+    bool string_;
+    int i_;
+    std::string name_;
+};
+
+
 /** \brief General function
 
   A general function \f$f\f$ in casadi can be multi-input, multi-output.\n
@@ -144,6 +171,12 @@ class FX : public OptionsFunctionality{
 
   /** \brief Get output scheme */
   CasADi::InputOutputScheme getOutputScheme() const;
+  
+  /** \brief Get index of input scheme name */
+  int inputSchemeEntry(const std::string &name) const;
+
+  /** \brief Get index of output scheme name */
+  int outputSchemeEntry(const std::string &name) const;
     
   /** \brief  Update the number of sensitivity directions during or after initialization (normally invoked internally) */
   void updateNumSens();
@@ -185,7 +218,7 @@ class FX : public OptionsFunctionality{
   * The generated Jacobian has one more output than the calling function corresponding to the Jacobian and the same number of inputs.
   * 
   */
-  FX jacobian(int iind=0, int oind=0, bool compact=false, bool symmetric=false);
+  FX jacobian(const InputIndex iind=0, const OutputIndex oind=0, bool compact=false, bool symmetric=false);
   
   /** \brief Generate a gradient function of output oind with respect to input iind
   * \param iind The index of the input
@@ -195,7 +228,7 @@ class FX : public OptionsFunctionality{
   * Note that the output must be scalar. In other cases, use the Jacobian instead.
   * 
   */
-  FX gradient(int iind=0, int oind=0);
+  FX gradient(const InputIndex iind=0, const OutputIndex oind=0);
   
   /** \brief Generate a Hessian function of output oind with respect to input iind 
   * \param iind The index of the input
@@ -205,7 +238,7 @@ class FX : public OptionsFunctionality{
   * and the gradients.
   * 
   */
-  FX hessian(int iind=0, int oind=0);
+  FX hessian(const InputIndex iind=0, const OutputIndex oind=0);
 
   /** \brief Generate a Jacobian function of all the inputs nonzeros (getNumScalarInputs()) with respect to all the output nonzeros (getNumScalarOutputs()).
   */
@@ -331,10 +364,10 @@ class FX : public OptionsFunctionality{
   FX derivative(int nfwd, int nadj);
 
   /// Get, if necessary generate, the sparsity of a Jacobian block
-  CRSSparsity& jacSparsity(int iind=0, int oind=0, bool compact=false, bool symmetric=false);
+  CRSSparsity& jacSparsity(const InputIndex iind=0, const OutputIndex oind=0, bool compact=false, bool symmetric=false);
 
   /// Generate the sparsity of a Jacobian block
-  void setJacSparsity(const CRSSparsity& sp, int iind, int oind, bool compact=false);
+  void setJacSparsity(const CRSSparsity& sp, const InputIndex iind, const OutputIndex oind, bool compact=false);
 
   /** \brief Export / Generate C code for the function */
   void generateCode(const std::string& filename);
@@ -357,25 +390,22 @@ class FX : public OptionsFunctionality{
   virtual bool checkNode() const;
   
   /// Const access input argument
-  const Matrix<double>& input(int iind=0) const;
+  const Matrix<double>& input(const InputIndex iind=0) const;
 
   /// Const access input argument
-  const Matrix<double>& input(const std::string &iname) const;
-
-  /// Const access input argument
-  const Matrix<double>& output(int oind=0) const;
+  const Matrix<double>& output(const OutputIndex oind=0) const;
 
   /// Const access forward seed
-  const Matrix<double>& fwdSeed(int iind=0, int dir=0) const;
+  const Matrix<double>& fwdSeed(const InputIndex iind=0, int dir=0) const;
 
   /// Const access forward sensitivity
-  const Matrix<double>& fwdSens(int oind=0, int dir=0) const;
+  const Matrix<double>& fwdSens(const OutputIndex oind=0, int dir=0) const;
   
   /// Const access adjoint seed
-  const Matrix<double>& adjSeed(int oind=0, int dir=0) const;
+  const Matrix<double>& adjSeed(const OutputIndex oind=0, int dir=0) const;
 
   /// Const access forward sensitivity
-  const Matrix<double>& adjSens(int iind=0, int dir=0) const;
+  const Matrix<double>& adjSens(const InputIndex iind=0, int dir=0) const;
 
 #ifdef SWIG
   // Rename the following functions in Python to avoid creating objects which can change the internal data of the FX class by mistake
@@ -388,27 +418,24 @@ class FX : public OptionsFunctionality{
 #endif // SWIG
 
   /// Access input argument
-  Matrix<double>& input(int iind=0);
+  Matrix<double>& input(const InputIndex iind=0);
 
-  /// Access input argument
-  Matrix<double>& input(const std::string &iname);
-  
   /** \brief Access output argument
   Note that copies in Python are shallow by default and fx.output() gives a reference/pointer to an internal data structure. So if you want save fx.output(), you need to make a deep copy using for example DMatrix(fx.output()).
   */
-  Matrix<double>& output(int oind=0);  
+  Matrix<double>& output(const OutputIndex oind=0);  
 
   /// Access forward seed
-  Matrix<double>& fwdSeed(int iind=0, int dir=0);
+  Matrix<double>& fwdSeed(const InputIndex iind=0, int dir=0);
   
   /// Access forward sensitivity
-  Matrix<double>& fwdSens(int oind=0, int dir=0);
+  Matrix<double>& fwdSens(const OutputIndex oind=0, int dir=0);
 
   /// Access adjoint seed
-  Matrix<double>& adjSeed(int oind=0, int dir=0);
+  Matrix<double>& adjSeed(const OutputIndex oind=0, int dir=0);
 
   /// Access forward sensitivity
-  Matrix<double>& adjSens(int iind=0, int dir=0);
+  Matrix<double>& adjSens(const InputIndex iind=0, int dir=0);
   
 
   
@@ -457,12 +484,12 @@ void setAdjSens(T val, int ind=0, int dir=0) const ;
 #endif
 
 #define SETTERS(T)\
-  void setInput(T val, int ind=0)             { assertInit(); input(ind).set(val);  } \
-  void setOutput(T val, int ind=0)            { assertInit(); output(ind).set(val); } \
-  void setFwdSeed(T val, int ind=0, int dir=0){ assertInit(); fwdSeed(ind,dir).set(val); } \
-  void setFwdSens(T val, int ind=0, int dir=0){ assertInit(); fwdSens(ind,dir).set(val); } \
-  void setAdjSeed(T val, int ind=0, int dir=0){ assertInit(); adjSeed(ind,dir).set(val); } \
-  void setAdjSens(T val, int ind=0, int dir=0){ assertInit(); adjSens(ind,dir).set(val); }
+  void setInput(T val, const InputIndex iind=0)             { assertInit(); input(iind).set(val);  } \
+  void setOutput(T val, const OutputIndex oind=0)            { assertInit(); output(oind).set(val); } \
+  void setFwdSeed(T val, const InputIndex iind=0, int dir=0){ assertInit(); fwdSeed(iind,dir).set(val); } \
+  void setFwdSens(T val, const OutputIndex oind=0, int dir=0){ assertInit(); fwdSens(oind,dir).set(val); } \
+  void setAdjSeed(T val, const OutputIndex oind=0, int dir=0){ assertInit(); adjSeed(oind,dir).set(val); } \
+  void setAdjSens(T val, const InputIndex iind=0, int dir=0){ assertInit(); adjSens(iind,dir).set(val); }
 
 #ifndef DOXYGENPROC
 SETTERS(double);
@@ -476,12 +503,12 @@ SETTERS(const Matrix<double>&);
 #undef SETTERS
 
 #define GETTERS(T)\
-    void getInput(T val, int ind=0) const             { assertInit(); input(ind).get(val);} \
-    void getOutput(T val, int ind=0) const            { assertInit(); output(ind).get(val);} \
-    void getFwdSeed(T val, int ind=0, int dir=0) const{ assertInit(); fwdSeed(ind,dir).get(val);} \
-    void getFwdSens(T val, int ind=0, int dir=0) const{ assertInit(); fwdSens(ind,dir).get(val);} \
-    void getAdjSeed(T val, int ind=0, int dir=0) const{ assertInit(); adjSeed(ind,dir).get(val);} \
-    void getAdjSens(T val, int ind=0, int dir=0) const{ assertInit(); adjSens(ind,dir).get(val);}
+    void getInput(T val, const InputIndex iind=0) const             { assertInit(); input(iind).get(val);} \
+    void getOutput(T val, const OutputIndex oind=0) const            { assertInit(); output(oind).get(val);} \
+    void getFwdSeed(T val, const InputIndex iind=0, int dir=0) const{ assertInit(); fwdSeed(iind,dir).get(val);} \
+    void getFwdSens(T val, const OutputIndex oind=0, int dir=0) const{ assertInit(); fwdSens(oind,dir).get(val);} \
+    void getAdjSeed(T val, const OutputIndex oind=0, int dir=0) const{ assertInit(); adjSeed(oind,dir).get(val);} \
+    void getAdjSens(T val, const InputIndex iind=0, int dir=0) const{ assertInit(); adjSens(iind,dir).get(val);}
 
 #ifndef DOXYGENPROC
 GETTERS(double&);
@@ -503,36 +530,36 @@ GETTERS(Matrix<double>&);
 /** \brief Writes out the input argument into val.
     \copydoc setter_getter_T
 */
-void getInput(T val, int ind=0) const;
+void getInput(T val, const InputIndex iind=0) const;
  
 /** 
     \brief Writes out the output argument into val.
     \copydoc setter_getter_T
 */
-void getOutput(T val, int ind=0) const;
+void getOutput(T val, const OutputIndex oind=0) const;
 
 /** 
     \brief Writes out the forward seed into val.
     \copydoc setter_getter_T
 */
-void getFwdSeed(T val,  int ind=0, int dir=0) const;
+void getFwdSeed(T val,  const InputIndex iind=0, int dir=0) const;
 
 /**  
     \brief Writes out the forward sensitivity into val.
     \copydoc setter_getter_T
 */
-void getFwdSens(T val, int ind=0, int dir=0) const;
+void getFwdSens(T val, const OutputIndex oind=0, int dir=0) const;
 /** 
     \brief Writes out the adjoint seed into val.
     \copydoc setter_getter_T
 */
-void getAdjSeed(T val,  int ind=0, int dir=0) const ;
+void getAdjSeed(T val,  const OutputIndex oind=0, int dir=0) const ;
 
 /** 
     \brief Writes out the adjoint sensitivity into val.
     \copydoc setter_getter_T
 */
-void getAdjSens(T val, int ind=0, int dir=0) const;
+void getAdjSens(T val, const InputIndex iind=0, int dir=0) const;
 /// @}
 #endif
 

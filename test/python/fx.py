@@ -497,7 +497,29 @@ class FXtests(casadiTestCase):
       d = vertcat(v)
       
       test(d.sparsity())
-        
+      
+  def test_namedinputs(self):
+    self.message("Named inputs")
+    x = msym("x")
+    p = msym("p")
+
+    f = MXFunction(daeIn(x=x,p=p),daeOut(ode=x*p))
+    f.init()
+
+    integrator = CVodesIntegrator(f)
+    integrator.init()
+    integrator.setInput(2,"x0")
+    
+    integrator.setOutput(7,"xf")
+
+    self.checkarray(integrator.input(INTEGRATOR_X0),DMatrix(2))
+    self.checkarray(integrator.output(INTEGRATOR_X0),DMatrix(7))
+
+    with self.assertRaises(Exception):
+      integrator.setInput(2,"foo")
+      
+      
+      
 if __name__ == '__main__':
     unittest.main()
 
