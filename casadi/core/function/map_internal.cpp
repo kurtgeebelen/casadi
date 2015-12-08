@@ -64,14 +64,22 @@ namespace casadi {
     if (par_op==opts.end() || par_op->second == "serial") {
       return new MapSerial(f, n);
     } else {
-      casadi_assert(par_op->second == "openmp");
-#ifdef WITH_OPENMP
-      return new MapOmp(f, n);
-#else // WITH_OPENMP
-      casadi_warning("CasADi was not compiled with OpenMP. "
-                     "Falling back to serial mode.");
+      if(par_op->second == "openmp") {
+  #ifdef WITH_OPENMP
+        return new MapOmp(f, n);
+  #else // WITH_OPENMP
+        casadi_warning("CasADi was not compiled with OpenMP. "
+                       "Falling back to serial mode.");
+  #endif // WITH_OPENMP
+      } else if (par_op->second == "opencl") {
+  #ifdef WITH_OPENCL
+        return new MapOcl(f, n);
+  #else // WITH_OPENCL
+        casadi_warning("CasADi was not compiled with OpenCL. "
+                       "Falling back to serial mode.");
+  #endif // WITH_OPENMP
+      }
       return new MapSerial(f, n);
-#endif // WITH_OPENMP
     }
   }
 
@@ -79,7 +87,7 @@ namespace casadi {
     : f_(f), n_in_(f.nIn()), n_out_(f.nOut()), n_(n) {
 
     addOption("parallelization", OT_STRING, "serial",
-              "Computational strategy for parallelization", "serial|openmp");
+              "Computational strategy for parallelization", "serial|openmp|opencl");
     addOption("reduced_inputs", OT_INTEGERVECTOR, GenericType(),
               "Reduction for certain inputs");
     addOption("reduced_outputs", OT_INTEGERVECTOR, GenericType(),
@@ -175,10 +183,13 @@ namespace casadi {
 
     if (parallelization.compare("serial")==0) {
       parallelization_ = PARALLELIZATION_SERIAL;
-    } else {
-      casadi_assert(parallelization.compare("openmp")==0);
+    } else if (parallelization.compare("openmp")==0) {
       parallelization_ = PARALLELIZATION_OMP;
+    } else if (parallelization.compare("opencl")==0) {
+      parallelization_ = PARALLELIZATION_OCL;
     }
+
+    std::cout << parallelization_ << std::endl;
 
     #ifndef WITH_OPENMP
     if (parallelization_ == PARALLELIZATION_OMP) {
@@ -187,6 +198,14 @@ namespace casadi {
       parallelization_ = PARALLELIZATION_SERIAL;
     }
     #endif // WITH_OPENMP
+
+    #ifndef WITH_OPENCL
+    if (parallelization_ == PARALLELIZATION_OCL) {
+      casadi_warning("CasADi was not compiled with OpenCL." <<
+                     "Falling back to serial mode.");
+      parallelization_ = PARALLELIZATION_OCL;
+    }
+    #endif // WITH_OPENCL
 
     // OpenMP not yet supported for non-repeated outputs
     bool non_repeated_output = false;
@@ -251,7 +270,7 @@ namespace casadi {
       if (!repeat_out_[i]) nnz_out_+= step_out_[i];
     }
 
-    if (parallelization_ == PARALLELIZATION_SERIAL) {
+    if (parallelization_ == PARALLELIZATION_SERIAL || parallelization_ == PARALLELIZATION_OMP) {
       alloc_w(f_.sz_w() + nnz_out_);
       alloc_iw(f_.sz_iw());
       alloc_arg(2*f_.sz_arg());
@@ -363,7 +382,7 @@ namespace casadi {
                           int* iw, double* w) {
     if (parallelization_ == PARALLELIZATION_SERIAL) {
       evalGen<double>(arg, res, iw, w, &FunctionInternal::eval, std::plus<double>());
-    } else {
+    } else if (parallelization_ == PARALLELIZATION_OMP) {
 #ifndef WITH_OPENMP
       casadi_error("the \"impossible\" happened: " <<
                    "should have fallen back to serial in init.");
@@ -386,6 +405,90 @@ namespace casadi {
         f_->eval(arg_i, res_i, iw_i, w_i);
       }
 #endif // WITH_OPENMP
+    } else if (parallelization_ == PARALLELIZATION_OCL) {
+#ifndef WITH_OPENCL
+      casadi_error("the \"impossible\" happened: " <<
+                   "should have fallen back to serial in init.");
+#else // WITH_OPENCL
+
+      std::vector< float > h_in(f_.nnzIn()*n_);
+      std::vector< float > h_out(f_.nnzOut()*n_);
+
+      int kk=0;
+      for (int j=0;j<n_;++j) {
+        for (int i=0;i<f_.nIn();++i) {
+          for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+            h_in[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
+            kk++;
+          }
+        }
+      }
+
+      cl::Buffer d_in;
+      cl::Buffer d_out;
+
+      try 
+      {
+        // Create a context
+    cl::Context context(DEVICE);
+
+    // Load in kernel source, creating a program object for the context
+
+    std::stringstream code;
+
+    code << "__kernel void vadd(" << std::endl;
+    code << "   __global float* h_in," << std::endl;             
+    code << "   __global float* h_out)" << std::endl;           
+    code << "{                            " << std::endl;        
+    code << "   int i = get_global_id(0);" << std::endl;         
+    code << "   h_out[i*" <<  f_.nnzOut() << "] = 2*h_in[i*" << f_.nnzIn()<< "]; " << std::endl;            
+    code << "}   " << std::endl;                            
+
+    cl::Program program(context, code.str(), true);
+
+    // Get the command queue
+    cl::CommandQueue queue(context);
+
+    // Create the kernel functor
+    auto vadd = cl::make_kernel<cl::Buffer, cl::Buffer>(program, "vadd");
+
+    d_in  = cl::Buffer(context, begin(h_in), end(h_in), true);
+    d_out = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
+
+    vadd(
+        cl::EnqueueArgs(
+            queue,
+            cl::NDRange(n_)), 
+        d_in,
+        d_out);
+
+    queue.finish();
+
+      cl::copy(queue, d_out, begin(h_out), end(h_out));
+
+      int kk=0;
+      for (int j=0;j<n_;++j) {
+        for (int i=0;i<f_.nOut();++i) {
+          for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+            res[i][k+j*f_.outputSparsity(i).nnz()] = h_out[kk];
+            kk++;
+          }
+        }
+      }
+
+      }
+      catch (cl::Error err) {
+    std::cout << "Exception\n";
+    std::cerr 
+        << "ERROR: "
+        << err.what()
+        << "("
+        << err.err()
+       << ")"
+       << std::endl;
+      }
+
+#endif // WITH_OPENCL
     }
   }
 
@@ -606,5 +709,24 @@ namespace casadi {
   }
 
 #endif // WITH_OPENMP
+
+#ifdef WITH_OPENCL
+
+  MapOcl::~MapOcl() {
+  }
+
+  void MapOcl::evalD(const double** arg, double** res, int* iw, double* w) {
+    
+
+  }
+
+  void MapOcl::init() {
+
+    MapSerial::init();
+
+   
+  }
+
+#endif // WITH_OPENCL
 
 } // namespace casadi

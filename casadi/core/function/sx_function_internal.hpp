@@ -189,50 +189,6 @@ class CASADI_EXPORT SXFunctionInternal :
   /// With just-in-time compilation for the sparsity propagation
   bool just_in_time_sparsity_;
 
-#ifdef WITH_OPENCL
-  // Initialize sparsity propagation using OpenCL
-  void allocOpenCL();
-
-  // Propagate sparsity using OpenCL
-  void evaluateOpenCL();
-
-  // Free memory for sparsity propagation using OpenCL
-  void freeOpenCL();
-
-  // Initialize sparsity propagation using OpenCL
-  void spAllocOpenCL();
-
-  // Propagate sparsity using OpenCL
-  void spEvaluateOpenCL(bool fwd);
-
-  // Free memory for sparsity propagation using OpenCL
-  void spFreeOpenCL();
-
-  // Compile OpenCL program
-  static void compileProgram(cl_program program);
-
-  // Execute OpenCL kernel
-  static void executeKernel(cl_kernel kernel);
-
-  // OpenCL memory object for the numerical evaluation
-  cl_program program_;
-
-  // OpenCL memory object for the sparsity propagation
-  cl_program sp_program_;
-
-  // Buffers and kernels for numerical evaluation
-  std::vector<cl_mem> input_memobj_, output_memobj_;
-  cl_kernel kernel_;
-
-  // Buffers and kernels for sparsity propagation
-  std::vector<cl_mem> sp_input_memobj_, sp_output_memobj_;
-  cl_kernel sp_fwd_kernel_, sp_adj_kernel_;
-
-  // OpenCL context. TODO: Nothing class specific in this class, move to a central location
-  static SparsityPropagationKernel sparsity_propagation_kernel_;
-
-#endif // WITH_OPENCL
-
 };
 
 

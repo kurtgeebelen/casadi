@@ -25,6 +25,7 @@
 
 #include "map_internal.hpp"
 
+
 namespace casadi {
   using namespace std;
 

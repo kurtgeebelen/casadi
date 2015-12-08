@@ -29,6 +29,19 @@
 #include "map.hpp"
 #include "function_internal.hpp"
 
+#ifdef WITH_OPENCL
+
+#define __CL_ENABLE_EXCEPTIONS
+
+#include "CL/cl.hpp"
+
+// pick up device type from compiler command line or from the default type
+#ifndef DEVICE
+#define DEVICE CL_DEVICE_TYPE_DEFAULT
+#endif
+
+#endif // WITH_OPENCL
+
 /// \cond INTERNAL
 
 namespace casadi {
@@ -128,6 +141,32 @@ namespace casadi {
   };
 #endif // WITH_OPENMP
 
+#ifdef WITH_OPENCL
+  /** A map Evaluate in parallel using OpenCL
+      Inherits from MapSerial to allow fallback to serial methods
+      \author Joris Gillis
+      \date 2015
+  */
+  class CASADI_EXPORT MapOcl : public MapSerial {
+    friend class MapBase;
+  protected:
+    // Constructor (protected, use create function in MapBase)
+    MapOcl(const Function& f, int n) : MapSerial(f, n) {}
+
+    /** \brief  clone function */
+    virtual MapOcl* clone() const { return new MapOcl(*this);}
+
+    /** \brief  Destructor */
+    virtual ~MapOcl();
+
+    /// Evaluate the function numerically
+    virtual void evalD(const double** arg, double** res, int* iw, double* w);
+
+    /** \brief  Initialize */
+    virtual void init();
+  };
+#endif // WITH_OPENCL
+
   /** A map operation that can also reduce certain arguments
       \author Joris Gillis
       \date 2015
@@ -137,7 +176,8 @@ namespace casadi {
     /** Types of parallelization supported */
     enum ParallelizationType {
       PARALLELIZATION_SERIAL,
-      PARALLELIZATION_OMP
+      PARALLELIZATION_OMP,
+      PARALLELIZATION_OCL,	
     };
 
     /** \brief Constructor (generic map) */
