@@ -41,6 +41,8 @@ namespace casadi {
     this->real_t = "double";
     this->codegen_scalars = false;
     this->with_header = false;
+    this->opencl = false;
+    this->meta = true;
 
     // Read options
     for (Dict::const_iterator it=opts.begin(); it!=opts.end(); ++it) {
@@ -58,6 +60,10 @@ namespace casadi {
         this->codegen_scalars = it->second;
       } else if (it->first=="with_header") {
         this->with_header = it->second;
+      } else if (it->first=="opencl") {
+        this->opencl = it->second;
+      } else if (it->first=="meta") {
+        this->meta = it->second;
       } else {
         casadi_error("Unrecongnized option: " << it->first);
       }
@@ -95,7 +101,9 @@ namespace casadi {
       this->header
         << "int " << fname << "(const real_t** arg, real_t** res, int* iw, real_t* w);" << endl;
     }
-    f->generateMeta(*this, fname);
+    if (this->meta) {
+      f->generateMeta(*this, fname);
+    }
     this->exposed_fname.push_back(fname);
   }
 
@@ -293,8 +301,12 @@ namespace casadi {
     s << "  " << lhs << " = " << rhs << ";" << endl;
   }
 
-  void CodeGenerator::printVector(std::ostream &s, const std::string& name, const vector<int>& v) {
-    s << "static const int " << name << "[] = {";
+  void CodeGenerator::printVector(std::ostream &s, const std::string& name, const vector<int>& v) const {
+    if (this->opencl) {
+    	s << "static const __constant int " << name << "[] = {";
+    } else {
+    	s << "static const int " << name << "[] = {";
+    }
     for (int i=0; i<v.size(); ++i) {
       if (i!=0) s << ", ";
       s << v[i];
@@ -303,8 +315,13 @@ namespace casadi {
   }
 
   void CodeGenerator::printVector(std::ostream &s, const std::string& name,
-                                  const vector<double>& v) {
-    s << "static const real_t " << name << "[] = {";
+                                  const vector<double>& v) const {
+    if (this->opencl) {
+    	s << "static const __constant real_t " << name << "[] = {";
+    } else {
+    	s << "static const real_t " << name << "[] = {";
+    }
+    
     for (int i=0; i<v.size(); ++i) {
       if (i!=0) s << ", ";
       s << constant(v[i]);

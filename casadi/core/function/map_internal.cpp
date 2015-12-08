@@ -25,6 +25,7 @@
 
 #include "map_internal.hpp"
 #include "mx_function.hpp"
+#include "../profiling.hpp"
 
 using namespace std;
 
@@ -381,7 +382,9 @@ namespace casadi {
   void MapReduce::evalD(const double** arg, double** res,
                           int* iw, double* w) {
     if (parallelization_ == PARALLELIZATION_SERIAL) {
+      double t0 = getRealTime();
       evalGen<double>(arg, res, iw, w, &FunctionInternal::eval, std::plus<double>());
+      std::cout << "serial [ms]:" << (getRealTime()-t0)*1000 << std::endl;
     } else if (parallelization_ == PARALLELIZATION_OMP) {
 #ifndef WITH_OPENMP
       casadi_error("the \"impossible\" happened: " <<
@@ -436,22 +439,75 @@ namespace casadi {
 
     std::stringstream code;
 
+    Dict opts;
+    opts["opencl"] = true;
+    opts["meta"] = false;
+
+    CodeGenerator cg(opts);
+    cg.add(f_,"F");
+
+    code << "#define d float" << std::endl;
+    code << "#define real_t float" << std::endl;
+    code << "#define CASADI_PREFIX(ID) test_c_ ## ID" << std::endl;
+
+    code << cg.generate() << std::endl;
+
     code << "__kernel void vadd(" << std::endl;
     code << "   __global float* h_in," << std::endl;             
     code << "   __global float* h_out)" << std::endl;           
-    code << "{                            " << std::endl;        
-    code << "   int i = get_global_id(0);" << std::endl;         
-    code << "   h_out[i*" <<  f_.nnzOut() << "] = 2*h_in[i*" << f_.nnzIn()<< "]; " << std::endl;            
-    code << "}   " << std::endl;                            
+    code << "{                            " << std::endl;
+    code << "   float h_in_local[" << f_.nnzIn() << "];" << std::endl;
+    code << "   float h_out_local[" << f_.nnzOut() << "];" << std::endl;
+    code << "   int i = get_global_id(0);" << std::endl; 
+    code << "   for (int k=0;k<"<< f_.nnzIn() << ";++k) { h_in_local[k] = h_in[k+i*" << f_.nnzIn() << "]; }" << std::endl;
+    code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
+    code << "   float w[" << f_.sz_w() << "];" << std::endl; 
 
-    cl::Program program(context, code.str(), true);
+  
+    code << "   const d* arg[] = {";
 
+    int offset= 0;
+    for (int i=0;i<f_.nIn();++i) {
+      code << "h_in_local+" << offset;
+      offset+= f_.inputSparsity(i).nnz();
+      if (i<f_.nIn()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+    code << "   d* res[] = {";
+
+    offset= 0;
+    for (int i=0;i<f_.nOut();++i) {
+      code << "h_out_local+" << offset;
+      offset+= f_.outputSparsity(i).nnz();
+      if (i<f_.nOut()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+
+    code << "   F(arg,res,iw,w); " << std::endl;
+    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k) { h_out[k+i*" << f_.nnzOut() << "] = h_out_local[k]; }" << std::endl;      
+    code << "}   " << std::endl;          
+
+    std::cout << code.str() << std::endl;
+    //Get all the available devices in the context
+    std::vector<cl::Device> devices 
+      = context.getInfo<CL_CONTEXT_DEVICES>();
+
+    cl::Program program(context, code.str());
+    try {
+      program.build(devices);
+    }  catch (cl::Error err) {
+      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]);
+    }
     // Get the command queue
     cl::CommandQueue queue(context);
+
+
+
 
     // Create the kernel functor
     auto vadd = cl::make_kernel<cl::Buffer, cl::Buffer>(program, "vadd");
 
+    double t0 = getRealTime();
     d_in  = cl::Buffer(context, begin(h_in), end(h_in), true);
     d_out = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
 
@@ -476,6 +532,8 @@ namespace casadi {
         }
       }
 
+    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+
       }
       catch (cl::Error err) {
     std::cout << "Exception\n";
@@ -486,6 +544,10 @@ namespace casadi {
         << err.err()
        << ")"
        << std::endl;
+
+
+
+
       }
 
 #endif // WITH_OPENCL

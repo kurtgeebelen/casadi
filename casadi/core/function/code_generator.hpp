@@ -130,10 +130,10 @@ namespace casadi {
     std::string workel(int n) const;
 
     /** \brief  Print int vector to a c file */
-    static void printVector(std::ostream &s, const std::string& name, const std::vector<int>& v);
+    void printVector(std::ostream &s, const std::string& name, const std::vector<int>& v) const;
 
     /** \brief  Print real vector to a c file */
-    static void printVector(std::ostream &s, const std::string& name, const std::vector<double>& v);
+    void printVector(std::ostream &s, const std::string& name, const std::vector<double>& v) const;
 
     /** \brief Create a copy_n operation */
     std::string copy_n(const std::string& arg, std::size_t n, const std::string& res);
@@ -193,6 +193,14 @@ namespace casadi {
 
     // Should we generate a main (allowing evaluation from command line)
     bool main;
+
+
+    // Creating opencl?
+    bool opencl;
+
+
+    // Creating meta?
+    bool meta;
 
     /** \brief Codegen scalar
      * Use the work vector for storing work vector elements of length 1
