@@ -414,18 +414,11 @@ namespace casadi {
                    "should have fallen back to serial in init.");
 #else // WITH_OPENCL
 
+      /*
+          Experiments: use __global, instead of h_in_local,h_out_local: 2 times slower
+      */
       std::vector< float > h_in(f_.nnzIn()*n_);
       std::vector< float > h_out(f_.nnzOut()*n_);
-
-      int kk=0;
-      for (int j=0;j<n_;++j) {
-        for (int i=0;i<f_.nIn();++i) {
-          for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
-            h_in[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
-            kk++;
-          }
-        }
-      }
 
       cl::Buffer d_in;
       cl::Buffer d_out;
@@ -446,6 +439,7 @@ namespace casadi {
     CodeGenerator cg(opts);
     cg.add(f_,"F");
 
+    //code << "#pragma OPENCL EXTENSION cl_khr_fp64: enable" << std::endl;
     code << "#define d float" << std::endl;
     code << "#define real_t float" << std::endl;
     code << "#define CASADI_PREFIX(ID) test_c_ ## ID" << std::endl;
@@ -508,6 +502,20 @@ namespace casadi {
     auto vadd = cl::make_kernel<cl::Buffer, cl::Buffer>(program, "vadd");
 
     double t0 = getRealTime();
+
+    double tin = getRealTime();
+
+    int kk=0;
+    for (int j=0;j<n_;++j) {
+      for (int i=0;i<f_.nIn();++i) {
+        for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+          h_in[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
+          kk++;
+        }
+      }
+    }
+    tin =  getRealTime()-tin;
+
     d_in  = cl::Buffer(context, begin(h_in), end(h_in), true);
     d_out = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
 
@@ -522,7 +530,8 @@ namespace casadi {
 
       cl::copy(queue, d_out, begin(h_out), end(h_out));
 
-      int kk=0;
+      double tout = getRealTime();
+      kk=0;
       for (int j=0;j<n_;++j) {
         for (int i=0;i<f_.nOut();++i) {
           for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
@@ -531,9 +540,10 @@ namespace casadi {
           }
         }
       }
+      tout =  getRealTime()-tout;
 
     std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
-
+    std::cout << "opencl -in&out [ms]:" << (tin+tout)*1000 << std::endl;
       }
       catch (cl::Error err) {
     std::cout << "Exception\n";

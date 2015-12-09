@@ -207,7 +207,9 @@ namespace casadi {
 
   void FunctionInternal::eval(const double** arg, double** res, int* iw, double* w) {
     if (evalD_) {
+      double t0 = getRealTime();
       evalD_(arg, res, iw, w);
+      std::cout << "codegen [ms]:" << (getRealTime()-t0)*1000 << std::endl;
     } else {
       evalD(arg, res, iw, w);
     }
