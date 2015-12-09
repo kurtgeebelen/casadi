@@ -31,7 +31,7 @@
 namespace casadi {
 
   /** \brief  Forward declaration of internal class */
-  class KernelSum2DInternal;
+  class KernelSum2DBase;
 
   /** KernelSum2D 
   
@@ -76,10 +76,10 @@ namespace casadi {
 
 
     /** \brief  Access functions of the node */
-    KernelSum2DInternal* operator->();
+    KernelSum2DBase* operator->();
 
     /** \brief  Const access functions of the node */
-    const KernelSum2DInternal* operator->() const;
+    const KernelSum2DBase* operator->() const;
 
     /// Check if a particular cast is allowed
     static bool testCast(const SharedObjectNode* ptr);

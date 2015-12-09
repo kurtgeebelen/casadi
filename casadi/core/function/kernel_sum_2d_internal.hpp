@@ -29,40 +29,91 @@
 #include "kernel_sum_2d.hpp"
 #include "function_internal.hpp"
 
+#ifdef WITH_OPENCL
+
+#define __CL_ENABLE_EXCEPTIONS
+
+#include "CL/cl.hpp"
+
+// pick up device type from compiler command line or from the default type
+#ifndef DEVICE
+#define DEVICE CL_DEVICE_TYPE_DEFAULT
+#endif
+
+#endif // WITH_OPENCL
+
 /// \cond INTERNAL
 
 namespace casadi {
+
+
+  class CASADI_EXPORT KernelSum2DBase : public FunctionInternal {
+    friend class KernelSum2D;
+  public:
+    // Create function (use instead of constructor)
+    static KernelSum2DBase* create(const Function& f,
+           const std::pair<int, int> & size,
+           double r,
+           int n, const Dict& opts);
+
+    /** \brief  Destructor */
+    virtual ~KernelSum2DBase();
+
+    /** \brief  Initialize */
+    virtual void init();
+
+    virtual void spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w);
+
+    /** \brief  Is the class able to propagate seeds through the algorithm? */
+    virtual bool spCanEvaluate(bool fwd) { return fwd; }
+
+  protected:
+    // Constructor (protected, use create function above)
+    KernelSum2DBase(const Function& f,
+           const std::pair<int, int> & size,
+           double r,
+           int n);
+
+    // Default case;
+    Function f_;
+
+    std::pair<int, int> size_;
+
+    double r_;
+
+    int n_;
+
+    int nnz_out_;
+
+    /// Nonzero step for outputs
+    std::vector<int> step_out_;
+
+  };
 
   /** KernelSum2D statement
       \author Joris Gillis
       \date 2015
   */
-  class CASADI_EXPORT KernelSum2DInternal : public FunctionInternal {
-    friend class KernelSum2D;
+  class CASADI_EXPORT KernelSum2DSerial : public KernelSum2DBase {
   public:
 
     /** \brief Constructor (generic kernel_sum_2d) */
-    KernelSum2DInternal(const Function& f,
+    KernelSum2DSerial(const Function& f,
            const std::pair<int, int> & size,
            double r,
-           int n);
+           int n) : KernelSum2DBase(f, size, r, n) {}
 
     /** \brief  clone function */
-    virtual KernelSum2DInternal* clone() const { return new KernelSum2DInternal(*this);}
+    virtual KernelSum2DSerial* clone() const { return new KernelSum2DSerial(*this);}
 
     /** \brief  Destructor */
-    virtual ~KernelSum2DInternal();
+    virtual ~KernelSum2DSerial();
 
     /** \brief  Initialize */
     virtual void init();
 
     /** \brief  Evaluate numerically, work vectors given */
     virtual void evalD(const double** arg, double** res, int* iw, double* w);
-
-    virtual void spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w);
-
-    /** \brief  Is the class able to propagate seeds through the algorithm? */
-    virtual bool spCanEvaluate(bool fwd) { return fwd; }
 
     ///@{
     /** \brief Generate a function that calculates \a nfwd forward derivatives */
@@ -85,21 +136,36 @@ namespace casadi {
     /** \brief Generate code for the body of the C function */
     virtual void generateBody(CodeGenerator& g) const;
 
-    // Default case;
-    Function f_;
-
-    std::pair<int, int> size_;
-
-    double r_;
-
-    int n_;
-
-    int nnz_out_;
-
-    /// Nonzero step for outputs
-    std::vector<int> step_out_;
-
   };
+
+#ifdef WITH_OPENCL
+  /** KernelSum2D statement
+      \author Joris Gillis
+      \date 2015
+  */
+  class CASADI_EXPORT KernelSum2DOcl : public KernelSum2DBase {
+  public:
+
+    /** \brief Constructor (generic kernel_sum_2d) */
+    KernelSum2DOcl(const Function& f,
+           const std::pair<int, int> & size,
+           double r,
+           int n) : KernelSum2DBase(f, size, r, n) {}
+
+    /** \brief  clone function */
+    virtual KernelSum2DOcl* clone() const { return new KernelSum2DOcl(*this);}
+
+    /** \brief  Destructor */
+    virtual ~KernelSum2DOcl();
+
+    /** \brief  Initialize */
+    virtual void init();
+
+    /** \brief  Evaluate numerically, work vectors given */
+    virtual void evalD(const double** arg, double** res, int* iw, double* w);
+  };
+
+#endif // WITH_OPENCL
 
 } // namespace casadi
 /// \endcond

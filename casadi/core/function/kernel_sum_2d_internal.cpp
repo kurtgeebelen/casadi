@@ -25,16 +25,50 @@
 
 #include "kernel_sum_2d_internal.hpp"
 #include "mx_function.hpp"
+#include "../profiling.hpp"
 
 using namespace std;
 
 namespace casadi {
 
-  KernelSum2DInternal::KernelSum2DInternal(const Function& f,
+  KernelSum2DBase* KernelSum2DBase::create(const Function& f,
+           const std::pair<int, int> & size,
+           double r,
+           int n, const Dict& opts)
+    {
+    // Read the type of parallelization
+    Dict::const_iterator par_op = opts.find("parallelization");
+    if (par_op==opts.end() || par_op->second == "serial") {
+      return new KernelSum2DSerial(f, size, r, n);
+    } else {
+      if(par_op->second == "openmp") {
+  #ifdef WITH_OPENMP
+        return new KernelSum2DSerial(f, size, r, n);
+  #else // WITH_OPENMP
+        casadi_warning("CasADi was not compiled with OpenMP. "
+                       "Falling back to serial mode.");
+  #endif // WITH_OPENMP
+      } else if (par_op->second == "opencl") {
+  #ifdef WITH_OPENCL
+        return new KernelSum2DOcl(f, size, r, n);
+  #else // WITH_OPENCL
+        casadi_warning("CasADi was not compiled with OpenCL. "
+                       "Falling back to serial mode.");
+  #endif // WITH_OPENMP
+      }
+      return new KernelSum2DSerial(f, size, r, n);
+    }
+  }
+
+  KernelSum2DBase::KernelSum2DBase(const Function& f,
            const std::pair<int, int> & size,
            double r,
            int n)
     : f_(f), size_(size), r_(r), n_(n) {
+
+
+    addOption("parallelization", OT_STRING, "serial",
+              "Computational strategy for parallelization", "serial|openmp|opencl");
 
     casadi_assert(n>=1);
 
@@ -49,10 +83,10 @@ namespace casadi {
     setOption("name", "unnamed_kernel_sum_2d");
   }
 
-  KernelSum2DInternal::~KernelSum2DInternal() {
+  KernelSum2DBase::~KernelSum2DBase() {
   }
 
-  void KernelSum2DInternal::init() {
+  void KernelSum2DBase::init() {
 
     int num_in = f_.nIn(), num_out = f_.nOut();
 
@@ -96,7 +130,9 @@ namespace casadi {
 
   static bvec_t Orring(bvec_t x, bvec_t y) { return x | y; }
 
-  void KernelSum2DInternal::spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
+
+
+  void KernelSum2DBase::spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
     // First input is non-differentiable
 
     int num_in = f_.nIn(), num_out = f_.nOut();
@@ -149,9 +185,20 @@ namespace casadi {
     }
   }
 
-  void KernelSum2DInternal::evalD(const double** arg, double** res,
+  KernelSum2DSerial::~KernelSum2DSerial() {
+  }
+
+  void KernelSum2DSerial::init() {
+    // Call the initialization method of the base class
+    KernelSum2DBase::init();
+
+  }
+
+  void KernelSum2DSerial::evalD(const double** arg, double** res,
                                 int* iw, double* w) {
     int num_in = f_.nIn(), num_out = f_.nOut();
+
+    double t0 = getRealTime();
 
     const double* V = arg[0];
     const double* X = arg[1];
@@ -213,11 +260,14 @@ namespace casadi {
           if (res1[k] && sum[k])
             std::transform(res1[k], res1[k]+step_out_[k], sum[k], sum[k], std::plus<double>());
         }
+
       }
     }
+
+    std::cout << "serial [ms]:" << (getRealTime()-t0)*1000 << std::endl;
   }
 
-  Function KernelSum2DInternal
+  Function KernelSum2DSerial
   ::getDerForward(const std::string& name, int nfwd, Dict& opts) {
 
     /* Write KernelSum2D in linear form:
@@ -288,7 +338,7 @@ namespace casadi {
     return der;
   }
 
-  Function KernelSum2DInternal
+  Function KernelSum2DSerial
   ::getDerReverse(const std::string& name, int nadj, Dict& opts) {
     /* Write KernelSum2D in linear form:
     *
@@ -382,11 +432,11 @@ namespace casadi {
     return ret;
   }
 
-  void KernelSum2DInternal::generateDeclarations(CodeGenerator& g) const {
+  void KernelSum2DSerial::generateDeclarations(CodeGenerator& g) const {
     f_->addDependency(g);
   }
 
-  void KernelSum2DInternal::generateBody(CodeGenerator& g) const {
+  void KernelSum2DSerial::generateBody(CodeGenerator& g) const {
     g.addAuxiliary(CodeGenerator::AUX_COPY_N);
     g.addAuxiliary(CodeGenerator::AUX_FILL_N);
     g.addAuxiliary(CodeGenerator::AUX_AXPY);
@@ -479,8 +529,215 @@ namespace casadi {
     }
   }
 
-  void KernelSum2DInternal::print(ostream &stream) const {
+  KernelSum2DOcl::~KernelSum2DOcl() {
+  }
+
+  void KernelSum2DSerial::print(ostream &stream) const {
     stream << "KernelSum2D(" << name(f_) << ", " << n_ << ")";
+  }
+
+
+  void KernelSum2DOcl::init() {
+    // Call the initialization method of the base class
+    KernelSum2DBase::init();
+
+  }
+
+  void KernelSum2DOcl::evalD(const double** arg, double** res,
+                                int* iw, double* w) {
+     int num_in = f_.nIn(), num_out = f_.nOut();
+
+
+
+     int s = round(r_)*2+1;
+     std::vector< float > im_in(s*s);
+
+     int arg_length = 0;
+     for (int i=2; i<num_in; ++i) {
+       arg_length+= f_.inputSparsity(i).nnz();
+     }
+
+     std::vector< float > args(arg_length);
+
+     std::vector< float > sum(f_.nnzOut()*s);
+
+      cl::Buffer d_im;
+      cl::Buffer d_args;
+      cl::Buffer d_sum;
+
+    const double* V = arg[0];
+    const double* X = arg[1];
+
+    //     ---> j,v
+    //   |
+    //   v  i,u
+    int u = round(X[0]);
+    int v = round(X[1]);
+    int r = round(r_);
+
+      try 
+      {
+        // Create a context
+    cl::Context context(DEVICE);
+
+    // Load in kernel source, creating a program object for the context
+
+    std::stringstream code;
+
+    Dict opts;
+    opts["opencl"] = true;
+    opts["meta"] = false;
+
+    CodeGenerator cg(opts);
+    cg.add(f_,"F");
+
+    //code << "#pragma OPENCL EXTENSION cl_khr_fp64: enable" << std::endl;
+    code << "#define d float" << std::endl;
+    code << "#define real_t float" << std::endl;
+    code << "#define CASADI_PREFIX(ID) test_c_ ## ID" << std::endl;
+
+    code << cg.generate() << std::endl;
+
+    code << "__kernel void vadd(" << std::endl;
+    code << "   __global float* im_in," << std::endl;     
+    code << "   __global float* sum_out," << std::endl; 
+    code << "   __global float* args," << std::endl;              
+    code << "   int i_offset," << std::endl;  
+    code << "   int j_offset)" << std::endl; 
+    code << "{                            " << std::endl;
+    code << "   float args_local[" << arg_length << "];" << std::endl;
+    code << "   float p[2];" << std::endl;
+    code << "   float value;" << std::endl;
+    code << "   int j = get_global_id(0);" << std::endl;
+    code << "   for (int k=0;k<"<< arg_length << ";++k) { args_local[k] = args[k]; }" << std::endl;
+
+    code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
+    code << "   float w[" << f_.sz_w() << "];" << std::endl;
+    code << "   float res_local[" << f_.nnzOut() << "];" << std::endl;
+    code << "   float sum[" << f_.nnzOut() << "];" << std::endl;
+
+    code << "   const d* arg[] = { p, &value,  ";
+
+    int offset= 0;
+    for (int i=2;i<f_.nIn();++i) {
+      code << "args_local+" << offset;
+      offset+= f_.inputSparsity(i).nnz();
+      if (i<f_.nIn()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+    code << "   d* res[] = {";
+
+    offset= 0;
+    for (int i=0;i<f_.nOut();++i) {
+      code << "res_local+" << offset;
+      offset+= f_.outputSparsity(i).nnz();
+      if (i<f_.nOut()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+    code << "   p[1] = j_offset + j;" << std::endl;
+    code << "   for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]= 0; }" << std::endl;
+    code << "   for (int i=0;i<" << s << ";++i) {" << std::endl;  
+    code << "     value = im_in[j*" << s <<" + i];" << std::endl;
+    code << "     p[0] = i_offset + i;" << std::endl;
+    code << "     F(arg,res,iw,w); " << std::endl;
+    code << "     for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]+= res_local[k]; }" << std::endl;
+    code << "   }" << std::endl;
+    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k) { sum_out[k+j*" << f_.nnzOut() << "] = sum[k]; }" << std::endl;
+    code << "}   " << std::endl;          
+
+    std::cout << code.str() << std::endl;
+    //Get all the available devices in the context
+    std::vector<cl::Device> devices 
+      = context.getInfo<CL_CONTEXT_DEVICES>();
+
+    cl::Program program(context, code.str());
+    try {
+      program.build(devices);
+    }  catch (cl::Error err) {
+      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]);
+    }
+    // Get the command queue
+    cl::CommandQueue queue(context);
+
+    // Create the kernel functor
+    auto vadd = cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer, int, int>(program, "vadd");
+
+    double t0 = getRealTime();
+
+
+    double tin = getRealTime();
+
+    std::fill(im_in.begin(), im_in.end(), 0);
+
+    int j_offset = v-r;
+    int i_offset = u-r;
+
+    for (int j = max(v-r, 0); j<= min(v+r, size_.second-1); ++j) {
+      for (int i = max(u-r, 0); i<= min(u+r, size_.first-1); ++i) {
+        // Set the pixel value input
+        im_in[(i-i_offset)+(j-j_offset)*s] = V[i+j*size_.first];
+      }
+    }
+
+    int kk = 0;
+    for (int i=2;i<f_.nIn();++i) {
+      for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+        args[kk] = arg[i-1][k];
+        
+        kk++;
+      }
+    }
+
+    tin =  getRealTime()-tin;
+
+    d_im   = cl::Buffer(context, begin(im_in), end(im_in), true);
+    d_sum = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s);
+    d_args  = cl::Buffer(context, begin(args), end(args), true);
+
+    vadd(
+        cl::EnqueueArgs(
+            queue,
+            cl::NDRange(s)), 
+        d_im,
+        d_sum,
+        d_args,
+        i_offset,
+        j_offset);
+
+    queue.finish();
+
+      cl::copy(queue, d_sum, begin(sum), end(sum));
+
+      double tout = getRealTime();
+      kk=0;
+      for (int j=0;j<s;++j) {
+        for (int i=0;i<f_.nOut();++i) {
+          for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+            res[i][k] += sum[kk];
+            kk++;
+          }
+        }
+      }
+      tout =  getRealTime()-tout;
+
+    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+    std::cout << "opencl in&out [ms]:" << (tin+tout)*1000 << std::endl;
+      }
+      catch (cl::Error err) {
+    std::cout << "Exception\n";
+    std::cerr 
+        << "ERROR: "
+        << err.what()
+        << "("
+        << err.err()
+       << ")"
+       << std::endl;
+
+
+
+
+    }
+
   }
 
 } // namespace casadi
