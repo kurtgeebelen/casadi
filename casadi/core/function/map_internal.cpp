@@ -36,6 +36,9 @@ namespace casadi {
     bool reduce_inputs = opts.find("reduced_inputs")!=opts.end();
     bool reduce_outputs = opts.find("reduced_outputs")!=opts.end();
 
+    // Read the type of parallelization
+    Dict::const_iterator par_op = opts.find("parallelization");
+
     if (reduce_inputs || reduce_outputs) {
       // Vector indicating which inputs/outputs are to be repeated
       std::vector<bool> repeat_in(f.nIn(), true), repeat_out(f.nOut(), true);
@@ -56,29 +59,61 @@ namespace casadi {
         }
       }
 
-      // Call constructor
-      return new MapReduce(f, n, repeat_in, repeat_out);
+
+      bool non_repeated_output = false;
+      for (int i=0;i<repeat_out.size();++i) {
+        non_repeated_output |= !repeat_out[i];
+      }
+
+      if (par_op==opts.end() || par_op->second == "serial") {
+        return new MapSumSerial(f, n, repeat_in, repeat_out);
+      } else {
+        if (par_op->second == "openmp") {
+          if (non_repeated_output) {
+            casadi_warning("OpenMP not yet supported for reduced outputs. "
+                           "Falling back to serial mode.");
+          } else {
+            #ifdef WITH_OPENMP
+            return new MapSumOmp(f, n, repeat_in, repeat_out);
+            #else // WITH_OPENMP
+            casadi_warning("CasADi was not compiled with OpenMP. "
+                           "Falling back to serial mode.");
+            #endif // WITH_OPENMP
+          }
+        } else if (par_op->second == "opencl") {
+          if (non_repeated_output) {
+            casadi_warning("OpenCL not yet supported for reduced outputs. "
+                           "Falling back to serial mode.");
+          } else {
+            #ifdef WITH_OPENCL
+            return new MapSumOcl(f, n, repeat_in, repeat_out);
+            #else // WITH_OPENCL
+            casadi_warning("CasADi was not compiled with OpenCL. "
+                           "Falling back to serial mode.");
+            #endif // WITH_OPENCL
+          }
+        }
+        return new MapSumSerial(f, n, repeat_in, repeat_out);
+      }
     }
 
-    // Read the type of parallelization
-    Dict::const_iterator par_op = opts.find("parallelization");
     if (par_op==opts.end() || par_op->second == "serial") {
       return new MapSerial(f, n);
     } else {
-      if(par_op->second == "openmp") {
-  #ifdef WITH_OPENMP
+      if (par_op->second == "openmp") {
+        #ifdef WITH_OPENMP
         return new MapOmp(f, n);
-  #else // WITH_OPENMP
+        #else // WITH_OPENMP
         casadi_warning("CasADi was not compiled with OpenMP. "
                        "Falling back to serial mode.");
-  #endif // WITH_OPENMP
+        #endif // WITH_OPENMP
       } else if (par_op->second == "opencl") {
-  #ifdef WITH_OPENCL
+        #ifdef WITH_OPENCL
         return new MapOcl(f, n);
-  #else // WITH_OPENCL
+        #else // WITH_OPENCL
         casadi_warning("CasADi was not compiled with OpenCL. "
                        "Falling back to serial mode.");
-  #endif // WITH_OPENMP
+        #endif // WITH_OPENMCL
       }
       return new MapSerial(f, n);
     }
@@ -99,77 +134,10 @@ namespace casadi {
 
     // Give a name
     setOption("name", "unnamed_map");
+
   }
 
   MapBase::~MapBase() {
-  }
-
-  MapSerial::~MapSerial() {
-  }
-
-  void MapSerial::init() {
-    // Call the initialization method of the base class
-    MapBase::init();
-
-    // Allocate sufficient memory for serial evaluation
-    alloc_arg(f_.sz_arg());
-    alloc_res(f_.sz_res());
-    alloc_w(f_.sz_w());
-    alloc_iw(f_.sz_iw());
-  }
-
-  template<typename T>
-  void MapSerial::evalGen(const T** arg, T** res, int* iw, T* w) {
-    int n_in = n_in_, n_out = n_out_;
-    const T** arg1 = arg+nIn();
-    T** res1 = res+nOut();
-    for (int i=0; i<n_; ++i) {
-      for (int j=0; j<n_in; ++j) arg1[j]=*arg++;
-      for (int j=0; j<n_out; ++j) res1[j]=*res++;
-      f_(arg1, res1, iw, w);
-    }
-  }
-
-  void MapSerial::evalD(const double** arg, double** res, int* iw, double* w) {
-    evalGen(arg, res, iw, w);
-  }
-
-  void MapSerial::evalSX(const SXElement** arg, SXElement** res, int* iw, SXElement* w) {
-    evalGen(arg, res, iw, w);
-  }
-
-  void MapSerial::spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
-    evalGen(arg, res, iw, w);
-  }
-
-  void MapSerial::spAdj(bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
-    int n_in = n_in_, n_out = n_out_;
-    bvec_t** arg1 = arg+nIn();
-    bvec_t** res1 = res+nOut();
-    for (int i=0; i<n_; ++i) {
-      for (int j=0; j<n_in; ++j) arg1[j]=*arg++;
-      for (int j=0; j<n_out; ++j) res1[j]=*res++;
-      f_->spAdj(arg1, res1, iw, w);
-    }
-  }
-
-  MapReduce::MapReduce(const Function& f, int n,
-                       const std::vector<bool> &repeat_in,
-                       const std::vector<bool> &repeat_out)
-    : MapBase(f, n), repeat_in_(repeat_in), repeat_out_(repeat_out) {
-
-    casadi_assert_message(repeat_in_.size()==f.nIn(),
-                          "MapReduce expected repeat_in of size " << f.nIn() <<
-                          ", but got " << repeat_in_.size() << " instead.");
-
-    casadi_assert_message(repeat_out_.size()==f.nOut(),
-                          "MapReduce expected repeat_out of size " << f.nOut() <<
-                          ", but got " << repeat_out_.size() << " instead.");
-
-  }
-
-  MapReduce::~MapReduce() {
-
   }
 
   void MapBase::init() {
@@ -178,47 +146,163 @@ namespace casadi {
 
   }
 
-  void MapReduce::init() {
+  void PureMap::init() {
+    // Initialize the functions, get input and output sparsities
+    // Input and output sparsities
 
-    std::string parallelization = getOption("parallelization").toString();
+    ibuf_.resize(f_.nIn());
+    obuf_.resize(f_.nOut());
 
-    if (parallelization.compare("serial")==0) {
-      parallelization_ = PARALLELIZATION_SERIAL;
-    } else if (parallelization.compare("openmp")==0) {
-      parallelization_ = PARALLELIZATION_OMP;
-    } else if (parallelization.compare("opencl")==0) {
-      parallelization_ = PARALLELIZATION_OCL;
+    for (int i=0;i<f_.nIn();++i) {
+      // Sparsity of the original input
+      Sparsity in_sp = f_.input(i).sparsity();
+
+      // Allocate space for map input
+      input(i) = DMatrix::zeros(repmat(in_sp, 1, n_));
     }
 
-    std::cout << parallelization_ << std::endl;
+    for (int i=0;i<f_.nOut();++i) {
+      // Sparsity of the original output
+      Sparsity out_sp = f_.output(i).sparsity();
 
-    #ifndef WITH_OPENMP
-    if (parallelization_ == PARALLELIZATION_OMP) {
-      casadi_warning("CasADi was not compiled with OpenMP." <<
-                     "Falling back to serial mode.");
-      parallelization_ = PARALLELIZATION_SERIAL;
-    }
-    #endif // WITH_OPENMP
-
-    #ifndef WITH_OPENCL
-    if (parallelization_ == PARALLELIZATION_OCL) {
-      casadi_warning("CasADi was not compiled with OpenCL." <<
-                     "Falling back to serial mode.");
-      parallelization_ = PARALLELIZATION_OCL;
-    }
-    #endif // WITH_OPENCL
-
-    // OpenMP not yet supported for non-repeated outputs
-    bool non_repeated_output = false;
-    for (int i=0;i<repeat_out_.size();++i) {
-      non_repeated_output |= !repeat_out_[i];
+      // Allocate space for map output
+      output(i) = DMatrix::zeros(repmat(out_sp, 1, n_));
     }
 
-    if (parallelization_ == PARALLELIZATION_OMP && non_repeated_output) {
-      casadi_warning("OpenMP not yet supported for non-repeated outputs. " <<
-                     "Falling back to serial mode.");
-      parallelization_ = PARALLELIZATION_SERIAL;
+    MapBase::init();
+
+    // Allocate sufficient memory for serial evaluation
+    alloc_arg(f_.sz_arg());
+    alloc_res(f_.sz_res());
+    alloc_w(f_.sz_w());
+    alloc_iw(f_.sz_iw());
+
+
+    step_in_.resize(nIn(), 0);
+    step_out_.resize(nOut(), 0);
+
+    for (int i=0;i<nIn();++i) {
+      step_in_[i] = f_.input(i).nnz();
     }
+
+    for (int i=0;i<nOut();++i) {
+      step_out_[i] = f_.output(i).nnz();
+    }
+
+  }
+
+  template<typename T>
+  void PureMap::evalGen(const T** arg, T** res, int* iw, T* w) {
+    const T** arg1 = arg+n_in_;
+    T** res1 = res+n_out_;
+
+    for (int i=0; i<n_; ++i) {
+      for (int j=0; j<n_in_;  ++j)
+        arg1[j] = (arg[j]==0) ? 0: arg[j]+i*step_in_[j];
+      for (int j=0; j<n_out_; ++j)
+        res1[j] = (res[j]==0) ? 0: res[j]+i*step_out_[j];
+      f_(arg1, res1, iw, w);
+    }
+  }
+
+  void PureMap::evalSX(const SXElement** arg, SXElement** res, int* iw, SXElement* w) {
+    evalGen(arg, res, iw, w);
+  }
+
+  void PureMap::spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
+    evalGen(arg, res, iw, w);
+  }
+
+  void PureMap::spAdj(bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
+    bvec_t** arg1 = arg+n_in_;
+    bvec_t** res1 = res+n_out_;
+
+    for (int i=0; i<n_; ++i) {
+      for (int j=0; j<n_in_;  ++j)
+        arg1[j] = (arg[j]==0) ? 0: arg[j]+i*step_in_[j];
+      for (int j=0; j<n_out_; ++j)
+        res1[j] = (res[j]==0) ? 0: res[j]+i*step_out_[j];
+      f_->spAdj(arg1, res1, iw, w);
+    }
+  }
+
+  Function PureMap
+  ::getDerForward(const std::string& name, int nfwd, Dict& opts) {
+
+    // Differentiate mapped function
+    Function df = f_.derForward(nfwd);
+
+    // Propagate options (if not set already)
+    if (opts.find("parallelization")==opts.end()) {
+      opts["parallelization"] = parallelization();
+    }
+
+    // Construct and return
+    return Map(name, df, n_, opts);
+  }
+
+  Function PureMap
+  ::getDerReverse(const std::string& name, int nadj, Dict& opts) {
+    // Differentiate mapped function
+    Function df = f_.derReverse(nadj);
+
+    // Propagate options (if not set already)
+    if (opts.find("parallelization")==opts.end()) {
+      opts["parallelization"] = parallelization();
+    }
+
+    // Construct and return
+    return Map(name, df, n_, opts);
+  }
+
+  void PureMap::generateDeclarations(CodeGenerator& g) const {
+    f_->addDependency(g);
+  }
+
+  void PureMap::generateBody(CodeGenerator& g) const {
+
+    int num_in = f_.nIn(), num_out = f_.nOut();
+
+    g.body << "  const real_t** arg1 = arg+" << f_.sz_arg() << ";" << endl;
+    g.body << "  real_t** res1 = res+"  << f_.sz_res() <<  ";" << endl;
+
+    g.body << "  int i;" << endl;
+    g.body << "  for (i=0; i<" << n_ << "; ++i) {" << endl;
+
+    for (int j=0; j<num_in; ++j) {
+      g.body << "    arg1[" << j << "] = (arg[" << j << "]==0)? " <<
+        "0: arg[" << j << "]+i*" << step_in_[j] << ";" << endl;
+    }
+    for (int j=0; j<num_out; ++j) {
+      g.body << "    res1[" << j << "] = (res[" << j << "]==0)? " <<
+        "0: res[" << j << "]+i*" << step_out_[j] << ";" << endl;
+    }
+
+    g.body << "    " << g.call(f_, "arg1", "res1", "iw", "w") << ";" << endl;
+    g.body << "  }" << std::endl;
+  }
+
+  MapSum::MapSum(const Function& f, int n,
+                       const std::vector<bool> &repeat_in,
+                       const std::vector<bool> &repeat_out)
+    : MapBase(f, n), repeat_in_(repeat_in), repeat_out_(repeat_out) {
+
+    casadi_assert_message(repeat_in_.size()==f.nIn(),
+                          "MapSum expected repeat_in of size " << f.nIn() <<
+                          ", but got " << repeat_in_.size() << " instead.");
+
+    casadi_assert_message(repeat_out_.size()==f.nOut(),
+                          "MapSum expected repeat_out of size " << f.nOut() <<
+                          ", but got " << repeat_out_.size() << " instead.");
+
+  }
+
+  MapSum::~MapSum() {
+
+  }
+
+
+  void MapSum::init() {
 
     int num_in = f_.nIn(), num_out = f_.nOut();
 
@@ -271,21 +355,16 @@ namespace casadi {
       if (!repeat_out_[i]) nnz_out_+= step_out_[i];
     }
 
-    if (parallelization_ == PARALLELIZATION_SERIAL || parallelization_ == PARALLELIZATION_OMP) {
-      alloc_w(f_.sz_w() + nnz_out_);
-      alloc_iw(f_.sz_iw());
-      alloc_arg(2*f_.sz_arg());
-      alloc_res(2*f_.sz_res());
-    } else if (parallelization_ == PARALLELIZATION_OMP) {
-      alloc_w(f_.sz_w()*n_ + nnz_out_);
-      alloc_iw(f_.sz_iw()*n_);
-      alloc_arg(f_.sz_arg()*(n_+1));
-      alloc_res(f_.sz_res()*(n_+1));
-    }
+    alloc_w(f_.sz_w() + nnz_out_);
+    alloc_iw(f_.sz_iw());
+    alloc_arg(2*f_.sz_arg());
+    alloc_res(2*f_.sz_res());
+
   }
 
+
   template<typename T, typename R>
-  void MapReduce::evalGen(const T** arg, T** res, int* iw, T* w,
+  void MapSum::evalGen(const T** arg, T** res, int* iw, T* w,
                             void (FunctionInternal::*eval)(const T** arg, T** res, int* iw, T* w),
                             R reduction) {
     int num_in = f_.nIn(), num_out = f_.nOut();
@@ -335,7 +414,7 @@ namespace casadi {
     }
   }
 
-  void MapReduce::spAdj(bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
+  void MapSum::spAdj(bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
     int num_in = f_.nIn(), num_out = f_.nOut();
 
     bvec_t** arg1 = arg+f_.sz_arg();
@@ -379,252 +458,19 @@ namespace casadi {
 
   }
 
-  void MapReduce::evalD(const double** arg, double** res,
-                          int* iw, double* w) {
-    if (parallelization_ == PARALLELIZATION_SERIAL) {
-      double t0 = getRealTime();
-      evalGen<double>(arg, res, iw, w, &FunctionInternal::eval, std::plus<double>());
-      std::cout << "serial [ms]:" << (getRealTime()-t0)*1000 << std::endl;
-    } else if (parallelization_ == PARALLELIZATION_OMP) {
-#ifndef WITH_OPENMP
-      casadi_error("the \"impossible\" happened: " <<
-                   "should have fallen back to serial in init.");
-#else // WITH_OPEMMP
-      int n_in_ = f_.nIn(), n_out_ = f_.nOut();
-      size_t sz_arg, sz_res, sz_iw, sz_w;
-      f_.sz_work(sz_arg, sz_res, sz_iw, sz_w);
-#pragma omp parallel for
-      for (int i=0; i<n_; ++i) {
-        const double** arg_i = arg + n_in_ + sz_arg*i;
-        for (int j=0; j<n_in_; ++j) {
-          arg_i[j] = arg[j]+i*step_in_[j];
-        }
-        double** res_i = res + n_out_ + sz_res*i;
-        for (int j=0; j<n_out_; ++j) {
-          res_i[j] = (res[j]==0)? 0: res[j]+i*step_out_[j];
-        }
-        int* iw_i = iw + i*sz_iw;
-        double* w_i = w + i*sz_w;
-        f_->eval(arg_i, res_i, iw_i, w_i);
-      }
-#endif // WITH_OPENMP
-    } else if (parallelization_ == PARALLELIZATION_OCL) {
-#ifndef WITH_OPENCL
-      casadi_error("the \"impossible\" happened: " <<
-                   "should have fallen back to serial in init.");
-#else // WITH_OPENCL
 
-      /*
-          Experiments: use __global, instead of h_in_local,h_out_local: 2 times slower
-      */
-      std::vector< float > h_in(f_.nnzIn()*n_);
-      std::vector< float > h_out(f_.nnzOut()*n_);
-
-      cl::Buffer d_in;
-      cl::Buffer d_out;
-
-      try 
-      {
-        // Create a context
-    cl::Context context(DEVICE);
-
-    // Load in kernel source, creating a program object for the context
-
-    std::stringstream code;
-
-    Dict opts;
-    opts["opencl"] = true;
-    opts["meta"] = false;
-
-    CodeGenerator cg(opts);
-    cg.add(f_,"F");
-
-    //code << "#pragma OPENCL EXTENSION cl_khr_fp64: enable" << std::endl;
-    code << "#define d float" << std::endl;
-    code << "#define real_t float" << std::endl;
-    code << "#define CASADI_PREFIX(ID) test_c_ ## ID" << std::endl;
-
-    code << cg.generate() << std::endl;
-
-    code << "__kernel void vadd(" << std::endl;
-    code << "   __global float* h_in," << std::endl;             
-    code << "   __global float* h_out)" << std::endl;           
-    code << "{                            " << std::endl;
-    code << "   float h_in_local[" << f_.nnzIn() << "];" << std::endl;
-    code << "   float h_out_local[" << f_.nnzOut() << "];" << std::endl;
-    code << "   int i = get_global_id(0);" << std::endl; 
-    code << "   for (int k=0;k<"<< f_.nnzIn() << ";++k) { h_in_local[k] = h_in[k+i*" << f_.nnzIn() << "]; }" << std::endl;
-    code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
-    code << "   float w[" << f_.sz_w() << "];" << std::endl; 
-
-  
-    code << "   const d* arg[] = {";
-
-    int offset= 0;
-    for (int i=0;i<f_.nIn();++i) {
-      code << "h_in_local+" << offset;
-      offset+= f_.inputSparsity(i).nnz();
-      if (i<f_.nIn()-1) code << ", ";
-    }
-    code << "};" << std::endl;
-    code << "   d* res[] = {";
-
-    offset= 0;
-    for (int i=0;i<f_.nOut();++i) {
-      code << "h_out_local+" << offset;
-      offset+= f_.outputSparsity(i).nnz();
-      if (i<f_.nOut()-1) code << ", ";
-    }
-    code << "};" << std::endl;
-
-    code << "   F(arg,res,iw,w); " << std::endl;
-    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k) { h_out[k+i*" << f_.nnzOut() << "] = h_out_local[k]; }" << std::endl;      
-    code << "}   " << std::endl;          
-
-    std::cout << code.str() << std::endl;
-    //Get all the available devices in the context
-    std::vector<cl::Device> devices 
-      = context.getInfo<CL_CONTEXT_DEVICES>();
-
-    cl::Program program(context, code.str());
-    try {
-      program.build(devices);
-    }  catch (cl::Error err) {
-      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]);
-    }
-    // Get the command queue
-    cl::CommandQueue queue(context);
-
-
-
-
-    // Create the kernel functor
-    auto vadd = cl::make_kernel<cl::Buffer, cl::Buffer>(program, "vadd");
-
-    double t0 = getRealTime();
-
-    double tin = getRealTime();
-
-    int kk=0;
-    for (int j=0;j<n_;++j) {
-      for (int i=0;i<f_.nIn();++i) {
-        for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
-          h_in[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
-          kk++;
-        }
-      }
-    }
-    tin =  getRealTime()-tin;
-
-    d_in  = cl::Buffer(context, begin(h_in), end(h_in), true);
-    d_out = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
-
-    vadd(
-        cl::EnqueueArgs(
-            queue,
-            cl::NDRange(n_)), 
-        d_in,
-        d_out);
-
-    queue.finish();
-
-      cl::copy(queue, d_out, begin(h_out), end(h_out));
-
-      double tout = getRealTime();
-      kk=0;
-      for (int j=0;j<n_;++j) {
-        for (int i=0;i<f_.nOut();++i) {
-          for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
-            res[i][k+j*f_.outputSparsity(i).nnz()] = h_out[kk];
-            kk++;
-          }
-        }
-      }
-      tout =  getRealTime()-tout;
-
-    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
-    std::cout << "opencl -in&out [ms]:" << (tin+tout)*1000 << std::endl;
-      }
-      catch (cl::Error err) {
-    std::cout << "Exception\n";
-    std::cerr 
-        << "ERROR: "
-        << err.what()
-        << "("
-        << err.err()
-       << ")"
-       << std::endl;
-
-
-
-
-      }
-
-#endif // WITH_OPENCL
-    }
-  }
-
-  void MapReduce::evalSX(const SXElement** arg, SXElement** res,
+  void MapSum::evalSX(const SXElement** arg, SXElement** res,
                            int* iw, SXElement* w) {
     evalGen<SXElement>(arg, res, iw, w, &FunctionInternal::evalSX, std::plus<SXElement>());
   }
 
   static bvec_t Orring(bvec_t x, bvec_t y) { return x | y; }
 
-  void MapReduce::spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
+  void MapSum::spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
     evalGen<bvec_t>(arg, res, iw, w, &FunctionInternal::spFwd, &Orring);
   }
 
-  /**void Map::spFwd(const bvec_t** arg, bvec_t** res, int* iw, bvec_t* w) {
-     evalGen<SXElement>(arg, res, iw, w);
-     }*/
-
-  /**
-     void MapReduce::evalMX(const std::vector<MX>& arg, std::vector<MX>& res) {
-     int num_in = f_.nIn(), num_out = f_.nOut();
-
-     // split arguments
-     std::vector< std::vector< MX > > arg_split;
-     for (int i=0;i<arg.size();++i) {
-     arg_split.push_back(horzsplit(arg[i], f_.input(i).size2()));
-     }
-
-     std::vector< std::vector<MX> > ret(n_);
-
-     // call the original function
-     for (int i=0; i<n_; ++i) {
-     std::vector< MX > argi;
-     for (int j=0;j<arg.size();++j) {
-     if (repeat_in_[j]) {
-     argi.push_back(arg_split[j][i]);
-     } else {
-     argi.push_back(arg_split[j][0]);
-     }
-     }
-     const_cast<Function&>(f_)->call(argi, ret[i], false, false);
-     }
-
-     ret = transpose(ret);
-
-     res.resize(num_out);
-
-     std::vector<MX> ret_cat;
-     for (int i=0;i<num_out;++i) {
-     if (repeat_out_[i]) {
-     res[i] = horzcat(ret[i]);
-     } else {
-     MX sum = 0;
-     for (int j=0;j<ret[i].size();++j) {
-     sum += ret[i][j];
-     }
-     res[i] = sum;
-     }
-     }
-
-     }
-  */
-
-  Function MapReduce
+  Function MapSum
   ::getDerForward(const std::string& name, int nfwd, Dict& opts) {
 
     // Differentiate mapped function
@@ -632,10 +478,7 @@ namespace casadi {
 
     // Propagate options (if not set already)
     if (opts.find("parallelization")==opts.end()) {
-      switch (parallelization_) {
-      case PARALLELIZATION_SERIAL: opts["parallelization"] = "serial"; break;
-      case PARALLELIZATION_OMP: opts["parallelization"] = "openmp"; break;
-      }
+      opts["parallelization"] = parallelization();
     }
 
     std::vector<bool> repeat_in;
@@ -654,17 +497,14 @@ namespace casadi {
     return Map(name, df, n_, repeat_in, repeat_out, opts);
   }
 
-  Function MapReduce
+  Function MapSum
   ::getDerReverse(const std::string& name, int nadj, Dict& opts) {
     // Differentiate mapped function
     Function df = f_.derReverse(nadj);
 
     // Propagate options (if not set already)
     if (opts.find("parallelization")==opts.end()) {
-      switch (parallelization_) {
-      case PARALLELIZATION_SERIAL: opts["parallelization"] = "serial"; break;
-      case PARALLELIZATION_OMP: opts["parallelization"] = "openmp"; break;
-      }
+      opts["parallelization"] = parallelization();
     }
 
     std::vector<bool> repeat_in;
@@ -683,11 +523,11 @@ namespace casadi {
     return Map(name, df, n_, repeat_in, repeat_out, opts);
   }
 
-  void MapReduce::generateDeclarations(CodeGenerator& g) const {
+  void MapSum::generateDeclarations(CodeGenerator& g) const {
     f_->addDependency(g);
   }
 
-  void MapReduce::generateBody(CodeGenerator& g) const {
+  void MapSum::generateBody(CodeGenerator& g) const {
 
     int num_in = f_.nIn(), num_out = f_.nOut();
 
@@ -744,8 +584,36 @@ namespace casadi {
     }
   }
 
-  void MapReduce::print(ostream &stream) const {
+  void MapSum::print(ostream &stream) const {
     stream << "Map(" << name(f_) << ", " << n_ << ")";
+  }
+
+  MapSerial::~MapSerial() {
+  }
+
+  void MapSerial::init() {
+    // Call the initialization method of the base class
+    PureMap::init();
+
+  }
+
+  void MapSerial::evalD(const double** arg, double** res, int* iw, double* w) {
+    evalGen(arg, res, iw, w);
+  }
+
+  void MapSumSerial::init() {
+    MapSum::init();
+  }
+
+  MapSumSerial::~MapSumSerial() {
+
+  }
+
+  void MapSumSerial::evalD(const double** arg, double** res,
+                          int* iw, double* w) {
+    double t0 = getRealTime();
+    evalGen<double>(arg, res, iw, w, &FunctionInternal::eval, std::plus<double>());
+    std::cout << "serial [ms]:" << (getRealTime()-t0)*1000 << std::endl;
   }
 
 #ifdef WITH_OPENMP
@@ -771,7 +639,7 @@ namespace casadi {
 
   void MapOmp::init() {
     // Call the initialization method of the base class
-    MapSerial::init();
+    PureMap::init();
 
     // Allocate sufficient memory for parallel evaluation
     alloc_arg(f_.sz_arg() * n_);
@@ -780,23 +648,409 @@ namespace casadi {
     alloc_iw(f_.sz_iw() * n_);
   }
 
+  void MapSumOmp::evalD(const double** arg, double** res,
+                          int* iw, double* w) {
+      size_t sz_arg, sz_res, sz_iw, sz_w;
+      f_.sz_work(sz_arg, sz_res, sz_iw, sz_w);
+#pragma omp parallel for
+      for (int i=0; i<n_; ++i) {
+        const double** arg_i = arg + n_in_ + sz_arg*i;
+        for (int j=0; j<n_in_; ++j) {
+          arg_i[j] = arg[j]+i*step_in_[j];
+        }
+        double** res_i = res + n_out_ + sz_res*i;
+        for (int j=0; j<n_out_; ++j) {
+          res_i[j] = (res[j]==0)? 0: res[j]+i*step_out_[j];
+        }
+        int* iw_i = iw + i*sz_iw;
+        double* w_i = w + i*sz_w;
+        f_->eval(arg_i, res_i, iw_i, w_i);
+      }
+  }
+
+
+  void MapSumOmp::init() {
+    // Call the initialization method of the base class
+    MapSum::init();
+
+    // Allocate sufficient memory for parallel evaluation
+    alloc_w(f_.sz_w()*n_ + nnz_out_);
+    alloc_iw(f_.sz_iw()*n_);
+    alloc_arg(f_.sz_arg()*(n_+1));
+    alloc_res(f_.sz_res()*(n_+1));
+  }
+
+  MapSumOmp::~MapSumOmp() {
+
+  }
+
 #endif // WITH_OPENMP
 
 #ifdef WITH_OPENCL
 
+
+  MapOcl::MapOcl(const Function& f, int n) : PureMap(f, n) {
+    addOption("opencl_select", OT_INTEGERVECTOR, std::vector<int>(1, 0),
+      "List with indices into OpenCL-compatible devices, to select which one to use. "
+      "You may use 'verbose' option to see the list of devices.");
+
+  }
+
   MapOcl::~MapOcl() {
+    if (kernel_) delete kernel_;
   }
 
   void MapOcl::evalD(const double** arg, double** res, int* iw, double* w) {
-    
 
+    double t0 = getRealTime();
+    double tin = getRealTime();
+
+    int kk=0;
+    for (int j=0;j<n_;++j) {
+      for (int i=0;i<f_.nIn();++i) {
+        for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+          h_in_[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
+          kk++;
+        }
+      }
+    }
+    tin =  getRealTime()-tin;
+
+    d_in_  = cl::Buffer(context_, begin(h_in_), end(h_in_), true);
+    d_out_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
+
+    (*kernel_)(
+        cl::EnqueueArgs(
+            queue_,
+            cl::NDRange(n_)),
+        d_in_,
+        d_out_);
+
+    queue_.finish();
+
+      cl::copy(queue_, d_out_, begin(h_out_), end(h_out_));
+
+      double tout = getRealTime();
+      kk=0;
+      for (int j=0;j<n_;++j) {
+        for (int i=0;i<f_.nOut();++i) {
+          for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+            res[i][k+j*f_.outputSparsity(i).nnz()] = h_out_[kk];
+            kk++;
+          }
+        }
+      }
+      tout =  getRealTime()-tout;
+
+    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+    std::cout << "opencl in&out [ms]:" << (tin+tout)*1000 << std::endl;
+
+  }
+
+  std::string MapOcl::kernelCode()  {
+    // Generate code for the kernel
+    std::stringstream code;
+
+    Dict opts;
+    opts["opencl"] = true;
+    opts["meta"] = false;
+
+    CodeGenerator cg(opts);
+    cg.add(f_, "F");
+
+    //code << "#pragma OPENCL EXTENSION cl_khr_fp64: enable" << std::endl;
+    code << "#define d float" << std::endl;
+    code << "#define real_t float" << std::endl;
+    code << "#define CASADI_PREFIX(ID) test_c_ ## ID" << std::endl;
+
+    code << cg.generate() << std::endl;
+
+    code << "__kernel void mykernel(" << std::endl;
+    code << "   __global float* h_in," << std::endl;
+    code << "   __global float* h_out)" << std::endl;
+    code << "{                            " << std::endl;
+    code << "   float h_in_local[" << f_.nnzIn() << "];" << std::endl;
+    code << "   float h_out_local[" << f_.nnzOut() << "];" << std::endl;
+    code << "   int i = get_global_id(0);" << std::endl;
+    code << "   for (int k=0;k<"<< f_.nnzIn() << ";++k)" << std::endl;
+    code << "     h_in_local[k] = h_in[k+i*" << f_.nnzIn() << "];" << std::endl;
+    code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
+    code << "   float w[" << f_.sz_w() << "];" << std::endl;
+    code << "   const d* arg[] = {";
+
+    int offset= 0;
+    for (int i=0;i<f_.nIn();++i) {
+      code << "h_in_local+" << offset;
+      offset+= f_.inputSparsity(i).nnz();
+      if (i<f_.nIn()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+    code << "   d* res[] = {";
+
+    offset= 0;
+    for (int i=0;i<f_.nOut();++i) {
+      code << "h_out_local+" << offset;
+      offset+= f_.outputSparsity(i).nnz();
+      if (i<f_.nOut()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+
+    code << "   F(arg,res,iw,w); " << std::endl;
+    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k)" << std::endl;
+    code << "     h_out[k+i*" << f_.nnzOut() << "] = h_out_local[k];" << std::endl;
+    code << "}   " << std::endl;
+    return code.str();
   }
 
   void MapOcl::init() {
 
-    MapSerial::init();
+    // Read in options
+    std::vector<int> opencl_select = getOption("opencl_select");
+    PureMap::init();
 
-   
+    // Construct a Platform to find available devices
+    cl::Platform platform;
+
+    std::vector<cl::Device> devices;
+    platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
+
+    if (verbose_) {
+      userOut() << "Available OpenCL devices" << std::endl;
+      for (int i=0;i<devices.size();++i) {
+        std::string name;
+        devices[i].getInfo(CL_DEVICE_NAME, &name);
+        userOut() << i << ":" << name << std::endl;
+      }
+    }
+
+    // Select the desired devices
+    for (int i=0;i<opencl_select.size();i++) {
+      devices_.push_back(devices.at(opencl_select[i]));
+    }
+
+    // Create a context
+    context_ = cl::Context(devices_);
+
+    // Compose and build the kernel
+    cl::Program program(context_, kernelCode());
+    try {
+      program.build(devices_);
+    }  catch (cl::Error err) {
+      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
+      casadi_error("Opencl compilation failed");
+    }
+
+    // Create the kernel functor
+    kernel_ = new cl::make_kernel<cl::Buffer, cl::Buffer>(program, "mykernel");
+
+    // Get the command queue
+    queue_ = cl::CommandQueue(context_);
+
+    // Allocate on-CPU buffer space
+    h_in_ = std::vector<float>(f_.nnzIn()*n_);
+    h_out_ = std::vector<float>(f_.nnzOut()*n_);
+
+  }
+
+  MapSumOcl::MapSumOcl(const Function& f, int n,
+    const std::vector<bool> &repeat_in, const std::vector<bool> &repeat_out) :
+      MapSum(f, n, repeat_in, repeat_out) {
+    addOption("opencl_select", OT_INTEGERVECTOR, std::vector<int>(1, 0),
+      "List with indices into OpenCL-compatible devices, to select which one to use. "
+      "You may use 'verbose' option to see the list of devices.");
+
+  }
+
+
+  std::string MapSumOcl::kernelCode()  {
+    // Generate code for the kernel
+    std::stringstream code;
+
+    Dict opts;
+    opts["opencl"] = true;
+    opts["meta"] = false;
+
+    CodeGenerator cg(opts);
+    cg.add(f_, "F");
+
+    //code << "#pragma OPENCL EXTENSION cl_khr_fp64: enable" << std::endl;
+    code << "#define d float" << std::endl;
+    code << "#define real_t float" << std::endl;
+    code << "#define CASADI_PREFIX(ID) test_c_ ## ID" << std::endl;
+
+    code << cg.generate() << std::endl;
+
+    code << "__kernel void mykernel(" << std::endl;
+    code << "   __global float* h_in," << std::endl;
+    code << "   __global float* h_fixed," << std::endl;
+    code << "   __global float* h_out)" << std::endl;
+    code << "{                            " << std::endl;
+    code << "   float h_in_local[" << nnz_in_ << "];" << std::endl;
+    code << "   float h_fixed_local[" << nnz_fixed_ << "];" << std::endl;
+    code << "   float h_out_local[" << f_.nnzOut() << "];" << std::endl;
+    code << "   int i = get_global_id(0);" << std::endl;
+    code << "   for (int k=0;k<"<< nnz_in_ << ";++k)" << std::endl;
+    code << "     h_in_local[k] = h_in[k+i*" << nnz_in_ << "];" << std::endl;
+    code << "   for (int k=0;k<"<< nnz_fixed_ << ";++k)" << std::endl;
+    code << "     h_fixed_local[k] = h_fixed[k];" << std::endl;
+    code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
+    code << "   float w[" << f_.sz_w() << "];" << std::endl;
+    code << "   const d* arg[] = {";
+
+    int offset = 0;
+    int offset_fixed = 0;
+    for (int i=0;i<f_.nIn();++i) {
+      if (repeat_in_[i]) {
+        code << "h_in_local+" << offset;
+
+        offset+= f_.inputSparsity(i).nnz();
+      } else {
+        code << "h_fixed_local+" << offset_fixed;
+
+        offset_fixed += f_.inputSparsity(i).nnz();
+      }
+      if (i<f_.nIn()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+    code << "   d* res[] = {";
+
+    offset= 0;
+    for (int i=0;i<f_.nOut();++i) {
+      code << "h_out_local+" << offset;
+      offset+= f_.outputSparsity(i).nnz();
+      if (i<f_.nOut()-1) code << ", ";
+    }
+    code << "};" << std::endl;
+
+    code << "   F(arg,res,iw,w); " << std::endl;
+    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k)" << std::endl;
+    code << "     h_out[k+i*" << f_.nnzOut() << "] = h_out_local[k];" << std::endl;
+    code << "}   " << std::endl;
+    return code.str();
+  }
+
+  void MapSumOcl::evalD(const double** arg, double** res, int* iw, double* w) {
+    double t0 = getRealTime();
+    double tin = getRealTime();
+
+    int kk=0;
+    for (int j=0;j<n_;++j) {
+      for (int i=0;i<f_.nIn();++i) {
+        if (repeat_in_[i]) {
+          for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+            h_in_[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
+            kk++;
+          }
+        }
+      }
+    }
+
+    kk=0;
+    for (int i=0;i<f_.nIn();++i) {
+      if (!repeat_in_[i]) {
+        for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+          h_fixed_[kk] = arg[i][k];
+          kk++;
+        }
+      }
+    }
+
+    tin =  getRealTime()-tin;
+
+    d_in_  = cl::Buffer(context_, begin(h_in_), end(h_in_), true);
+    d_fixed_  = cl::Buffer(context_, begin(h_fixed_), end(h_fixed_), true);
+    d_out_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
+
+    (*kernel_)(
+        cl::EnqueueArgs(
+            queue_,
+            cl::NDRange(n_)),
+        d_in_,
+        d_fixed_,
+        d_out_);
+
+    queue_.finish();
+
+    cl::copy(queue_, d_out_, begin(h_out_), end(h_out_));
+
+    double tout = getRealTime();
+    kk=0;
+    for (int j=0;j<n_;++j) {
+      for (int i=0;i<f_.nOut();++i) {
+        for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+          res[i][k+j*f_.outputSparsity(i).nnz()] = h_out_[kk];
+          kk++;
+        }
+      }
+    }
+    tout =  getRealTime()-tout;
+
+    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+    std::cout << "opencl in&out [ms]:" << (tin+tout)*1000 << std::endl;
+  }
+
+  void MapSumOcl::init() {
+    MapSum::init();
+
+    nnz_in_ = 0;nnz_fixed_ = 0;
+    for (int i=0;i<n_in_;++i) {
+      if (repeat_in_[i]) {
+        nnz_in_  += f_.input(i).nnz();
+      } else {
+        nnz_fixed_ += f_.input(i).nnz();
+      }
+    }
+
+    // Allocate on-CPU buffer space
+    h_in_ = std::vector<float>(nnz_in_*n_);
+    h_fixed_ = std::vector<float>(nnz_fixed_);
+    h_out_ = std::vector<float>(f_.nnzOut()*n_);
+
+    // Read in options
+    std::vector<int> opencl_select = getOption("opencl_select");
+
+    // Construct a Platform to find available devices
+    cl::Platform platform;
+
+    std::vector<cl::Device> devices;
+    platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
+
+    if (verbose_) {
+      userOut() << "Available OpenCL devices" << std::endl;
+      for (int i=0;i<devices.size();++i) {
+        std::string name;
+        devices[i].getInfo(CL_DEVICE_NAME, &name);
+        userOut() << i << ":" << name << std::endl;
+      }
+    }
+
+    // Select the desired devices
+    for (int i=0;i<opencl_select.size();i++) {
+      devices_.push_back(devices.at(opencl_select[i]));
+    }
+
+    // Create a context
+    context_ = cl::Context(devices_);
+
+    // Compose and build the kernel
+    cl::Program program(context_, kernelCode());
+    try {
+      program.build(devices_);
+    }  catch (cl::Error err) {
+      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
+      casadi_error("Opencl compilation failed");
+    }
+
+    // Create the kernel functor
+    kernel_ = new cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer>(program, "mykernel");
+
+    // Get the command queue
+    queue_ = cl::CommandQueue(context_);
+
+  }
+
+  MapSumOcl::~MapSumOcl() {
+
   }
 
 #endif // WITH_OPENCL

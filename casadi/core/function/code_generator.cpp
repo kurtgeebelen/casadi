@@ -301,11 +301,12 @@ namespace casadi {
     s << "  " << lhs << " = " << rhs << ";" << endl;
   }
 
-  void CodeGenerator::printVector(std::ostream &s, const std::string& name, const vector<int>& v) const {
+  void CodeGenerator::printVector(std::ostream &s, const std::string& name,
+      const vector<int>& v) const {
     if (this->opencl) {
-    	s << "static const __constant int " << name << "[] = {";
+      s << "static const __constant int " << name << "[] = {";
     } else {
-    	s << "static const int " << name << "[] = {";
+      s << "static const int " << name << "[] = {";
     }
     for (int i=0; i<v.size(); ++i) {
       if (i!=0) s << ", ";
@@ -317,11 +318,11 @@ namespace casadi {
   void CodeGenerator::printVector(std::ostream &s, const std::string& name,
                                   const vector<double>& v) const {
     if (this->opencl) {
-    	s << "static const __constant real_t " << name << "[] = {";
+      s << "static const __constant real_t " << name << "[] = {";
     } else {
-    	s << "static const real_t " << name << "[] = {";
+      s << "static const real_t " << name << "[] = {";
     }
-    
+
     for (int i=0; i<v.size(); ++i) {
       if (i!=0) s << ", ";
       s << constant(v[i]);
