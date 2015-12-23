@@ -265,7 +265,7 @@ namespace casadi {
       }
     }
 
-    std::cout << "serial [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+    std::cout << "serial kernelsum [ms]:" << (getRealTime()-t0)*1000 << std::endl;
   }
 
   Function KernelSum2DBase
@@ -693,7 +693,11 @@ namespace casadi {
 
   void KernelSum2DOcl::evalD(const double** arg, double** res,
                                 int* iw, double* w) {
-                                
+    double t0 = getRealTime();
+
+
+    double tin = getRealTime();
+                     
                   
     for (int i=0;i<f_.nOut();++i) {
       if (res[i]) {
@@ -715,10 +719,6 @@ namespace casadi {
   
 
 
-    double t0 = getRealTime();
-
-
-    double tin = getRealTime();
 
     std::fill(h_im_.begin(), h_im_.end(), 0);
 
