@@ -314,7 +314,13 @@ namespace casadi {
 
     Function f_forward = MXFunction("f", f_inputs, fd(fd_inputs));
 
-    Function ret = KernelSum2D(name, f_forward, size_, r_, n_);
+    Dict options = opts;
+    // Propagate options (if not set already)
+    if (options.find("parallelization")==options.end()) {
+      options["parallelization"] = parallelization();
+    }
+    
+    Function ret = KernelSum2D(name, f_forward, size_, r_, n_, options);
 
     /* Furthermore, we need to return something of signature
     *  der(V,X,S,V_dot,X_dot)
@@ -396,7 +402,13 @@ namespace casadi {
 
     Function f_reverse = MXFunction("f", f_inputs, f_outputs);
 
-    Function kn = KernelSum2D(name, f_reverse, size_, r_, n_);
+    Dict options = opts;
+    // Propagate options (if not set already)
+    if (options.find("parallelization")==options.end()) {
+      options["parallelization"] = parallelization();
+    }
+    
+    Function kn = KernelSum2D(name, f_reverse, size_, r_, n_, options);
 
     /* Furthermore, we need to return something of signature
     *  der(V,X,S,S_bar) -> V_bar, X_bar
@@ -597,7 +609,7 @@ namespace casadi {
     // Compose and build the kernel
     cl::Program program(context_, kernelCode());
     try {
-      std::string options = ""; //-cl-fast-relaxed-math";
+      std::string options = "-g"; //-cl-fast-relaxed-math";
       program.build(devices_, options.c_str());
     }  catch (cl::Error err) {
       std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
@@ -654,25 +666,21 @@ namespace casadi {
     code << "   float w[" << f_.sz_w() << "];" << std::endl;
     code << "   float res_local[" << f_.nnzOut() << "];" << std::endl;
     code << "   float sum[" << f_.nnzOut() << "];" << std::endl;
-
-    code << "   const d* arg[] = { p, &value,  ";
+    code << "   const d* arg[" << f_.sz_arg() << "];" << std::endl;
+    code << "   d* res[" << f_.sz_res() << "];" << std::endl;
+    code << "   arg[0] = p;arg[1]=&value;";
 
     int offset= 0;
     for (int i=2;i<f_.nIn();++i) {
-      code << "args_local+" << offset;
+      code << "arg[" << i << "] = args_local+" << offset << ";";
       offset+= f_.inputSparsity(i).nnz();
-      if (i<f_.nIn()-1) code << ", ";
     }
-    code << "};" << std::endl;
-    code << "   d* res[] = {";
 
     offset= 0;
     for (int i=0;i<f_.nOut();++i) {
-      code << "res_local+" << offset;
+      code << "res[" << i << "] = res_local+" << offset << ";";
       offset+= f_.outputSparsity(i).nnz();
-      if (i<f_.nOut()-1) code << ", ";
     }
-    code << "};" << std::endl;
     code << "   p[1] = j_offset + j;" << std::endl;
     code << "   for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]= 0; }" << std::endl;
     code << "   for (int i=0;i<" << s_ << ";++i) {" << std::endl;  

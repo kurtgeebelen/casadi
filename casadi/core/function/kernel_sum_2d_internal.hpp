@@ -78,6 +78,10 @@ namespace casadi {
     virtual Function getDerReverse(const std::string& name, int nadj, Dict& opts);
     virtual int numDerReverse() const { return 64;}
     ///@}
+    
+    
+    /// Type of parallellization
+    virtual std::string parallelization() const = 0;
 
   protected:
     // Constructor (protected, use create function above)
@@ -135,6 +139,9 @@ namespace casadi {
 
     /** \brief Generate code for the body of the C function */
     virtual void generateBody(CodeGenerator& g) const;
+    
+    /// Type of parallellization
+    virtual std::string parallelization() const { return "serial"; }
 
   };
 
@@ -163,6 +170,9 @@ namespace casadi {
 
     /** \brief  Evaluate numerically, work vectors given */
     virtual void evalD(const double** arg, double** res, int* iw, double* w);
+    
+    /// Type of parallellization
+    virtual std::string parallelization() const { return "opencl"; }
     
     /// Obtain code for the kernel
     std::string kernelCode();
