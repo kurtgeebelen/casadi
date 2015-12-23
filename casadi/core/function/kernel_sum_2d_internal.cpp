@@ -609,7 +609,7 @@ namespace casadi {
     // Compose and build the kernel
     cl::Program program(context_, kernelCode());
     try {
-      std::string options = "-g"; //-cl-fast-relaxed-math";
+      std::string options = ""; //-cl-fast-relaxed-math";
       program.build(devices_, options.c_str());
     }  catch (cl::Error err) {
       std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
@@ -672,13 +672,13 @@ namespace casadi {
 
     int offset= 0;
     for (int i=2;i<f_.nIn();++i) {
-      code << "arg[" << i << "] = args_local+" << offset << ";";
+      code << "arg[" << i << "] = args_local+" << offset << ";" << std::endl;
       offset+= f_.inputSparsity(i).nnz();
     }
 
     offset= 0;
     for (int i=0;i<f_.nOut();++i) {
-      code << "res[" << i << "] = res_local+" << offset << ";";
+      code << "res[" << i << "] = res_local+" << offset << ";"  << std::endl;
       offset+= f_.outputSparsity(i).nnz();
     }
     code << "   p[1] = j_offset + j;" << std::endl;
@@ -780,9 +780,6 @@ namespace casadi {
        << ")"
        << std::endl;
 
-
-
-
     }
     
       cl::copy(queue_, d_sum_, begin(h_sum_), end(h_sum_));
@@ -803,9 +800,7 @@ namespace casadi {
       }
       tout =  getRealTime()-tout;
 
-    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
-    std::cout << "opencl in&out [ms]:" << (tin+tout)*1000 << std::endl;
-
+    std::cout << "opencl kernelsum [ms]:" << (getRealTime()-t0)*1000 << " / in&out [ms] " << (tin+tout)*1000 << std::endl;
 
   }
 

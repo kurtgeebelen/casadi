@@ -613,7 +613,7 @@ namespace casadi {
                           int* iw, double* w) {
     double t0 = getRealTime();
     evalGen<double>(arg, res, iw, w, &FunctionInternal::eval, std::plus<double>());
-    std::cout << "serial [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+    std::cout << "serial mapsum '" << name_ << "' [ms]:" << (getRealTime()-t0)*1000 << std::endl;
   }
 
 #ifdef WITH_OPENMP
