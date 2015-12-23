@@ -776,24 +776,19 @@ namespace casadi {
     code << "     h_in_local[k] = h_in[k+i*" << f_.nnzIn() << "];" << std::endl;
     code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
     code << "   float w[" << f_.sz_w() << "];" << std::endl;
-    code << "   const d* arg[] = {";
+    code << "   const d* arg[" << f_.sz_arg() << "];" << std::endl;
+    code << "   d* res[" << f_.sz_res() << "];" << std::endl;
 
     int offset= 0;
     for (int i=0;i<f_.nIn();++i) {
-      code << "h_in_local+" << offset;
+      code << "   arg[" << i << "] = h_in_local+" << offset << ";" << std::endl;
       offset+= f_.inputSparsity(i).nnz();
-      if (i<f_.nIn()-1) code << ", ";
     }
-    code << "};" << std::endl;
-    code << "   d* res[] = {";
-
     offset= 0;
     for (int i=0;i<f_.nOut();++i) {
-      code << "h_out_local+" << offset;
+      code << "   res[" << i << "] = h_out_local+" << offset << ";" << std::endl;
       offset+= f_.outputSparsity(i).nnz();
-      if (i<f_.nOut()-1) code << ", ";
     }
-    code << "};" << std::endl;
 
     code << "   F(arg,res,iw,w); " << std::endl;
     code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k)" << std::endl;
@@ -834,7 +829,8 @@ namespace casadi {
     // Compose and build the kernel
     cl::Program program(context_, kernelCode());
     try {
-      program.build(devices_);
+      std::string options = ""; //-cl-fast-relaxed-math";
+      program.build(devices_, options.c_str());
     }  catch (cl::Error err) {
       std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
       casadi_error("Opencl compilation failed");
@@ -885,6 +881,7 @@ namespace casadi {
     code << "   __global float* h_fixed," << std::endl;
     code << "   __global float* h_out)" << std::endl;
     code << "{                            " << std::endl;
+    //code << "for (int i=0;i<" << f_.nnzOut()*n_ << ";++i) { h_out[i] = 1;}" << std::endl;
     code << "   float h_in_local[" << nnz_in_ << "];" << std::endl;
     code << "   float h_fixed_local[" << nnz_fixed_ << "];" << std::endl;
     code << "   float h_out_local[" << f_.nnzOut() << "];" << std::endl;
@@ -895,37 +892,43 @@ namespace casadi {
     code << "     h_fixed_local[k] = h_fixed[k];" << std::endl;
     code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
     code << "   float w[" << f_.sz_w() << "];" << std::endl;
-    code << "   const d* arg[] = {";
+    code << "   const d* arg[" << f_.sz_arg() << "];" << std::endl;
+    code << "   d* res[" << f_.sz_res() << "];" << std::endl;
 
     int offset = 0;
     int offset_fixed = 0;
     for (int i=0;i<f_.nIn();++i) {
       if (repeat_in_[i]) {
-        code << "h_in_local+" << offset;
-
+        code << "   arg[" << i << "] = h_in_local+" << offset << ";" << std::endl;
         offset+= f_.inputSparsity(i).nnz();
       } else {
-        code << "h_fixed_local+" << offset_fixed;
-
+        code << "   arg[" << i << "] = h_fixed_local+" << offset_fixed << ";" << std::endl;
         offset_fixed += f_.inputSparsity(i).nnz();
       }
-      if (i<f_.nIn()-1) code << ", ";
     }
-    code << "};" << std::endl;
-    code << "   d* res[] = {";
 
     offset= 0;
     for (int i=0;i<f_.nOut();++i) {
-      code << "h_out_local+" << offset;
+      code << "   res[" << i << "] = h_out_local+" << offset  << ";" << std::endl;
       offset+= f_.outputSparsity(i).nnz();
-      if (i<f_.nOut()-1) code << ", ";
     }
-    code << "};" << std::endl;
 
-    code << "   F(arg,res,iw,w); " << std::endl;
+    code << "   F(arg, res, iw, w); " << std::endl;
     code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k)" << std::endl;
-    code << "     h_out[k+i*" << f_.nnzOut() << "] = h_out_local[k];" << std::endl;
+    code << "     h_out[k+i*" << f_.nnzOut() << "] = 1;" << std::endl; // h_out_local[k]
     code << "}   " << std::endl;
+
+    std::cout << code.str() << std::endl;
+
+    printDimensions(std::cout);
+
+    f_.printDimensions(std::cout);
+    std::cout << f_.sz_arg() << std::endl;
+    std::cout << f_.sz_res() << std::endl;
+    std::cout << f_.sz_iw() << std::endl;
+    std::cout << f_.sz_w() << std::endl;
+
+    std::cout << "buffers " << h_in_.size() << " - " << h_fixed_.size() << " || " << h_out_.size() << std::endl;
     return code.str();
   }
 
@@ -957,19 +960,40 @@ namespace casadi {
 
     tin =  getRealTime()-tin;
 
-    d_in_  = cl::Buffer(context_, begin(h_in_), end(h_in_), true);
-    d_fixed_  = cl::Buffer(context_, begin(h_fixed_), end(h_fixed_), true);
-    d_out_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
+    try {
 
-    (*kernel_)(
-        cl::EnqueueArgs(
-            queue_,
-            cl::NDRange(n_)),
-        d_in_,
-        d_fixed_,
-        d_out_);
+      // check the source code of CL.hpp for a speedup
+      d_in_  = cl::Buffer(context_, begin(h_in_), end(h_in_), true);
+      d_fixed_  = cl::Buffer(context_, begin(h_fixed_), end(h_fixed_), true);
 
-    queue_.finish();
+      d_out_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
+
+      std::cout << "got here" << n_ << std::endl;
+      (*kernel_)(
+          cl::EnqueueArgs(
+              queue_,
+              cl::NDRange(n_)),
+          d_in_,
+          d_fixed_,
+          d_out_);
+      std::cout << "got there" << std::endl;
+      queue_.finish();
+
+      }
+      catch (cl::Error err) {
+        std::cout << "Exception\n";
+        std::cerr 
+            << "ERROR: "
+            << err.what()
+            << "("
+            << err.err()
+           << ")"
+           << std::endl;
+        casadi_error("woops");
+
+
+
+    }
 
     cl::copy(queue_, d_out_, begin(h_out_), end(h_out_));
 
@@ -977,9 +1001,13 @@ namespace casadi {
     kk=0;
     for (int j=0;j<n_;++j) {
       for (int i=0;i<f_.nOut();++i) {
-        for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
-          res[i][k+j*f_.outputSparsity(i).nnz()] = h_out_[kk];
-          kk++;
+        if (res[i]) {
+          for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+            res[i][k+j*f_.outputSparsity(i).nnz()] = h_out_.at(kk);
+            kk++;
+          }
+        } else {
+          kk+= f_.outputSparsity(i).nnz();
         }
       }
     }
@@ -1003,8 +1031,11 @@ namespace casadi {
 
     // Allocate on-CPU buffer space
     h_in_ = std::vector<float>(nnz_in_*n_);
-    h_fixed_ = std::vector<float>(nnz_fixed_);
+    // It is an error for an OpenCL buffer to have zero size
+    h_fixed_ = std::vector<float>(nnz_fixed_==0? 1 : nnz_fixed_);
     h_out_ = std::vector<float>(f_.nnzOut()*n_);
+
+    std::cout << "Buffer sizes " << nnz_in_*n_ << " , " << nnz_fixed_ << "->" << f_.nnzOut()*n_ << std::endl;
 
     // Read in options
     std::vector<int> opencl_select = getOption("opencl_select");
@@ -1035,7 +1066,8 @@ namespace casadi {
     // Compose and build the kernel
     cl::Program program(context_, kernelCode());
     try {
-      program.build(devices_);
+      std::string options = "";//-cl-fast-relaxed-math";
+      program.build(devices_, options.c_str());
     }  catch (cl::Error err) {
       std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
       casadi_error("Opencl compilation failed");

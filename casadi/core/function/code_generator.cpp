@@ -155,6 +155,7 @@ namespace casadi {
     // Real type (usually double)
     for (int i=0; i<s.size(); ++i) {
       s[i]
+        << "#define __constant" << endl
         << "#ifndef real_t" << endl
         << "#define real_t " << this->real_t << endl
         << "#define to_double(x) "
@@ -685,7 +686,11 @@ namespace casadi {
     stringstream s;
     // Perform operation
     addAuxiliary(AUX_COPY_N);
-    s << "copy_n(" << arg << ", " << n << ", " << res << ");";
+    if (arg[0]=='c') {
+      s << "copy_nc(" << arg << ", " << n << ", " << res << ");";
+    } else {
+      s << "copy_n(" << arg << ", " << n << ", " << res << ");";
+    }
     return s.str();
   }
 
