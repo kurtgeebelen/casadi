@@ -1909,27 +1909,28 @@ class Functiontests(casadiTestCase):
 
     f = SXFunction("f",[p,v,x],[v**2*exp(-r**2)/pi])
 
-    F = KernelSum2D("test",f,(n,m),4,1,{"ad_weight": 1})
+    for p in ["serial","opencl"]:
+      F = KernelSum2D("test",f,(n,m),4,1,{"ad_weight": 1,"parallelization": p})
 
-    x0 = DMatrix([n/2,m/2])
+      x0 = DMatrix([n/2,m/2])
 
-    Fref = Map("f",f,n*m,[True,True,False],[False])
-    
-    print Fref([horzcat([vec(xx),vec(yy)]).T,vec(z),x0])
-    print F([z,x0])
-    
-    zs = MX.sym("z", z.shape)
-    xs = MX.sym("x",2)
-    Fref = MXFunction("Fref",[zs,xs],Fref([horzcat([vec(xx),vec(yy)]).T,vec(zs),xs]))
-    
-    F.setInput(z,0)
-    Fref.setInput(z,0)
-    
-    F.setInput(x0,1)
-    Fref.setInput(x0,1)
-    
-    self.checkfunction(F,Fref,digits=5,allow_nondiff=True,evals=False)
-    self.check_codegen(F)
+      Fref = Map("f",f,n*m,[True,True,False],[False])
+      
+      print Fref([horzcat([vec(xx),vec(yy)]).T,vec(z),x0])
+      print F([z,x0])
+      
+      zs = MX.sym("z", z.shape)
+      xs = MX.sym("x",2)
+      Fref = MXFunction("Fref",[zs,xs],Fref([horzcat([vec(xx),vec(yy)]).T,vec(zs),xs]))
+      
+      F.setInput(z,0)
+      Fref.setInput(z,0)
+      
+      F.setInput(x0,1)
+      Fref.setInput(x0,1)
+      
+      self.checkfunction(F,Fref,digits=5,allow_nondiff=True,evals=False)
+      self.check_codegen(F)
 
 if __name__ == '__main__':
     unittest.main()

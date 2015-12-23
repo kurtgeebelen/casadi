@@ -66,6 +66,18 @@ namespace casadi {
 
     /** \brief  Is the class able to propagate seeds through the algorithm? */
     virtual bool spCanEvaluate(bool fwd) { return fwd; }
+    
+    ///@{
+    /** \brief Generate a function that calculates \a nfwd forward derivatives */
+    virtual Function getDerForward(const std::string& name, int nfwd, Dict& opts);
+    virtual int numDerForward() const { return 64;}
+    ///@}
+
+    ///@{
+    /** \brief Generate a function that calculates \a nadj adjoint derivatives */
+    virtual Function getDerReverse(const std::string& name, int nadj, Dict& opts);
+    virtual int numDerReverse() const { return 64;}
+    ///@}
 
   protected:
     // Constructor (protected, use create function above)
@@ -115,18 +127,6 @@ namespace casadi {
     /** \brief  Evaluate numerically, work vectors given */
     virtual void evalD(const double** arg, double** res, int* iw, double* w);
 
-    ///@{
-    /** \brief Generate a function that calculates \a nfwd forward derivatives */
-    virtual Function getDerForward(const std::string& name, int nfwd, Dict& opts);
-    virtual int numDerForward() const { return 64;}
-    ///@}
-
-    ///@{
-    /** \brief Generate a function that calculates \a nadj adjoint derivatives */
-    virtual Function getDerReverse(const std::string& name, int nadj, Dict& opts);
-    virtual int numDerReverse() const { return 64;}
-    ///@}
-
     /** \brief  Print description */
     virtual void print(std::ostream &stream) const;
 
@@ -150,7 +150,7 @@ namespace casadi {
     KernelSum2DOcl(const Function& f,
            const std::pair<int, int> & size,
            double r,
-           int n) : KernelSum2DBase(f, size, r, n) {}
+           int n);
 
     /** \brief  clone function */
     virtual KernelSum2DOcl* clone() const { return new KernelSum2DOcl(*this);}
@@ -163,6 +163,31 @@ namespace casadi {
 
     /** \brief  Evaluate numerically, work vectors given */
     virtual void evalD(const double** arg, double** res, int* iw, double* w);
+    
+    /// Obtain code for the kernel
+    std::string kernelCode();
+
+    std::vector<cl::Device> devices_;
+
+    cl::Context context_;
+
+    cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer, int, int> *kernel_;
+    cl::CommandQueue queue_;
+
+    cl::Buffer d_im_;
+    cl::Buffer d_args_;
+    cl::Buffer d_sum_;
+
+    std::vector< float > h_sum_;
+    std::vector< float > h_args_;
+    std::vector< float > h_im_;
+
+    int nnz_in_;
+    int nnz_fixed_;
+    
+    int s_;
+
+
   };
 
 #endif // WITH_OPENCL

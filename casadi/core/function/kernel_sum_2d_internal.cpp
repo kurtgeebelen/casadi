@@ -26,6 +26,7 @@
 #include "kernel_sum_2d_internal.hpp"
 #include "mx_function.hpp"
 #include "../profiling.hpp"
+#include <sstream>
 
 using namespace std;
 
@@ -267,7 +268,7 @@ namespace casadi {
     std::cout << "serial [ms]:" << (getRealTime()-t0)*1000 << std::endl;
   }
 
-  Function KernelSum2DSerial
+  Function KernelSum2DBase
   ::getDerForward(const std::string& name, int nfwd, Dict& opts) {
 
     /* Write KernelSum2D in linear form:
@@ -338,7 +339,7 @@ namespace casadi {
     return der;
   }
 
-  Function KernelSum2DSerial
+  Function KernelSum2DBase
   ::getDerReverse(const std::string& name, int nadj, Dict& opts) {
     /* Write KernelSum2D in linear form:
     *
@@ -528,6 +529,17 @@ namespace casadi {
       return f.getOption("name");
     }
   }
+  
+  KernelSum2DOcl::KernelSum2DOcl(const Function& f,
+    const std::pair<int, int> & size,
+    double r,
+    int n) : KernelSum2DBase(f, size, r, n) {
+      addOption("opencl_select", OT_INTEGERVECTOR, std::vector<int>(1, 0),
+        "List with indices into OpenCL-compatible devices, to select which one to use. "
+        "You may use 'verbose' option to see the list of devices.");
+
+
+  }
 
   KernelSum2DOcl::~KernelSum2DOcl() {
   }
@@ -538,50 +550,77 @@ namespace casadi {
 
 
   void KernelSum2DOcl::init() {
+  
+    int num_in = f_.nIn(), num_out = f_.nOut();
     // Call the initialization method of the base class
     KernelSum2DBase::init();
 
+
+    s_ = round(r_)*2+1;
+    h_im_.resize(s_*s_);
+
+    int arg_length = 0;
+    for (int i=2; i<num_in; ++i) {
+      arg_length+= f_.inputSparsity(i).nnz();
+    }
+
+    h_args_.resize(arg_length);
+    h_sum_.resize(f_.nnzOut()*s_);
+
+    
+     // Read in options
+    std::vector<int> opencl_select = getOption("opencl_select");
+
+    // Construct a Platform to find available devices
+    cl::Platform platform;
+
+    std::vector<cl::Device> devices;
+    platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
+
+    if (verbose_) {
+      userOut() << "Available OpenCL devices" << std::endl;
+      for (int i=0;i<devices.size();++i) {
+        std::string name;
+        devices[i].getInfo(CL_DEVICE_NAME, &name);
+        userOut() << i << ":" << name << std::endl;
+      }
+    }
+
+    // Select the desired devices
+    for (int i=0;i<opencl_select.size();i++) {
+      devices_.push_back(devices.at(opencl_select[i]));
+    }
+
+    // Create a context
+    context_ = cl::Context(devices_);
+
+    // Compose and build the kernel
+    cl::Program program(context_, kernelCode());
+    try {
+      std::string options = ""; //-cl-fast-relaxed-math";
+      program.build(devices_, options.c_str());
+    }  catch (cl::Error err) {
+      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
+      std::cerr 
+        << "ERROR: "
+        << err.what()
+        << "("
+        << err.err()
+       << ")"
+       << std::endl;
+      casadi_error("Opencl compilation failed");
+    }
+
+    // Create the kernel functor
+    kernel_ = new cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer, int, int>(program, "mykernel");
+
+    // Get the command queue
+    queue_ = cl::CommandQueue(context_);
+
+
   }
-
-  void KernelSum2DOcl::evalD(const double** arg, double** res,
-                                int* iw, double* w) {
-     int num_in = f_.nIn(), num_out = f_.nOut();
-
-
-
-     int s = round(r_)*2+1;
-     std::vector< float > im_in(s*s);
-
-     int arg_length = 0;
-     for (int i=2; i<num_in; ++i) {
-       arg_length+= f_.inputSparsity(i).nnz();
-     }
-
-     std::vector< float > args(arg_length);
-
-     std::vector< float > sum(f_.nnzOut()*s);
-
-      cl::Buffer d_im;
-      cl::Buffer d_args;
-      cl::Buffer d_sum;
-
-    const double* V = arg[0];
-    const double* X = arg[1];
-
-    //     ---> j,v
-    //   |
-    //   v  i,u
-    int u = round(X[0]);
-    int v = round(X[1]);
-    int r = round(r_);
-
-      try 
-      {
-        // Create a context
-    cl::Context context(DEVICE);
-
-    // Load in kernel source, creating a program object for the context
-
+  
+  std::string KernelSum2DOcl::kernelCode() {
     std::stringstream code;
 
     Dict opts;
@@ -598,18 +637,18 @@ namespace casadi {
 
     code << cg.generate() << std::endl;
 
-    code << "__kernel void vadd(" << std::endl;
+    code << "__kernel void mykernel(" << std::endl;
     code << "   __global float* im_in," << std::endl;     
     code << "   __global float* sum_out," << std::endl; 
     code << "   __global float* args," << std::endl;              
     code << "   int i_offset," << std::endl;  
     code << "   int j_offset)" << std::endl; 
     code << "{                            " << std::endl;
-    code << "   float args_local[" << arg_length << "];" << std::endl;
+    code << "   float args_local[" << h_args_.size() << "];" << std::endl;
     code << "   float p[2];" << std::endl;
     code << "   float value;" << std::endl;
     code << "   int j = get_global_id(0);" << std::endl;
-    code << "   for (int k=0;k<"<< arg_length << ";++k) { args_local[k] = args[k]; }" << std::endl;
+    code << "   for (int k=0;k<"<< h_args_.size() << ";++k) { args_local[k] = args[k]; }" << std::endl;
 
     code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
     code << "   float w[" << f_.sz_w() << "];" << std::endl;
@@ -636,38 +675,52 @@ namespace casadi {
     code << "};" << std::endl;
     code << "   p[1] = j_offset + j;" << std::endl;
     code << "   for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]= 0; }" << std::endl;
-    code << "   for (int i=0;i<" << s << ";++i) {" << std::endl;  
-    code << "     value = im_in[j*" << s <<" + i];" << std::endl;
+    code << "   for (int i=0;i<" << s_ << ";++i) {" << std::endl;  
+    code << "     value = im_in[j*" << s_ <<" + i];" << std::endl;
     code << "     p[0] = i_offset + i;" << std::endl;
     code << "     F(arg,res,iw,w); " << std::endl;
     code << "     for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]+= res_local[k]; }" << std::endl;
     code << "   }" << std::endl;
     code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k) { sum_out[k+j*" << f_.nnzOut() << "] = sum[k]; }" << std::endl;
-    code << "}   " << std::endl;          
-
+    code << "}   " << std::endl;     
+    
     std::cout << code.str() << std::endl;
-    //Get all the available devices in the context
-    std::vector<cl::Device> devices 
-      = context.getInfo<CL_CONTEXT_DEVICES>();
+    
+       
+    return code.str();
+    
+  }
 
-    cl::Program program(context, code.str());
-    try {
-      program.build(devices);
-    }  catch (cl::Error err) {
-      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]);
-    }
-    // Get the command queue
-    cl::CommandQueue queue(context);
+  void KernelSum2DOcl::evalD(const double** arg, double** res,
+                                int* iw, double* w) {
+                                
+                  
+    for (int i=0;i<f_.nOut();++i) {
+      if (res[i]) {
+        for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+          res[i][k] = 0;
+        }
+      }
+    }            
+                                
+    const double* V = arg[0];
+    const double* X = arg[1];
 
-    // Create the kernel functor
-    auto vadd = cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer, int, int>(program, "vadd");
+    //     ---> j,v
+    //   |
+    //   v  i,u
+    int u = round(X[0]);
+    int v = round(X[1]);
+    int r = round(r_);
+  
+
 
     double t0 = getRealTime();
 
 
     double tin = getRealTime();
 
-    std::fill(im_in.begin(), im_in.end(), 0);
+    std::fill(h_im_.begin(), h_im_.end(), 0);
 
     int j_offset = v-r;
     int i_offset = u-r;
@@ -675,14 +728,15 @@ namespace casadi {
     for (int j = max(v-r, 0); j<= min(v+r, size_.second-1); ++j) {
       for (int i = max(u-r, 0); i<= min(u+r, size_.first-1); ++i) {
         // Set the pixel value input
-        im_in[(i-i_offset)+(j-j_offset)*s] = V[i+j*size_.first];
+        h_im_[(i-i_offset)+(j-j_offset)*s_] = V[i+j*size_.first];
       }
     }
 
     int kk = 0;
     for (int i=2;i<f_.nIn();++i) {
+      casadi_assert(arg[i-1]!=0);
       for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
-        args[kk] = arg[i-1][k];
+        h_args_[kk] = arg[i-1][k];
         
         kk++;
       }
@@ -690,38 +744,23 @@ namespace casadi {
 
     tin =  getRealTime()-tin;
 
-    d_im   = cl::Buffer(context, begin(im_in), end(im_in), true);
-    d_sum = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s);
-    d_args  = cl::Buffer(context, begin(args), end(args), true);
+    try 
+    {
+    d_im_   = cl::Buffer(context_, begin(h_im_), end(h_im_), true);
+    d_sum_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s_);
+    d_args_  = cl::Buffer(context_, begin(h_args_), end(h_args_), true);
 
-    vadd(
+    (*kernel_)(
         cl::EnqueueArgs(
-            queue,
-            cl::NDRange(s)), 
-        d_im,
-        d_sum,
-        d_args,
+            queue_,
+            cl::NDRange(s_)), 
+        d_im_,
+        d_sum_,
+        d_args_,
         i_offset,
         j_offset);
 
-    queue.finish();
-
-      cl::copy(queue, d_sum, begin(sum), end(sum));
-
-      double tout = getRealTime();
-      kk=0;
-      for (int j=0;j<s;++j) {
-        for (int i=0;i<f_.nOut();++i) {
-          for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
-            res[i][k] += sum[kk];
-            kk++;
-          }
-        }
-      }
-      tout =  getRealTime()-tout;
-
-    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
-    std::cout << "opencl in&out [ms]:" << (tin+tout)*1000 << std::endl;
+    queue_.finish();
       }
       catch (cl::Error err) {
     std::cout << "Exception\n";
@@ -737,6 +776,28 @@ namespace casadi {
 
 
     }
+    
+      cl::copy(queue_, d_sum_, begin(h_sum_), end(h_sum_));
+
+      double tout = getRealTime();
+      kk=0;
+      for (int j=0;j<s_;++j) {
+        for (int i=0;i<f_.nOut();++i) {
+          if (res[i]) {
+            for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+              res[i][k] += h_sum_[kk];
+              kk++;
+            }
+          } else {
+            kk += f_.outputSparsity(i).nnz();
+          }
+        }
+      }
+      tout =  getRealTime()-tout;
+
+    std::cout << "opencl [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+    std::cout << "opencl in&out [ms]:" << (tin+tout)*1000 << std::endl;
+
 
   }
 
