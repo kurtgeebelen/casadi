@@ -571,13 +571,17 @@ namespace casadi {
     s_ = round(r_)*2+1;
     h_im_.resize(s_*s_);
 
+    ss_ = 2;
+
+    sfrac_ = double(s_)/ss_;
+
     int arg_length = 0;
     for (int i=2; i<num_in; ++i) {
       arg_length+= f_.inputSparsity(i).nnz();
     }
 
     h_args_.resize(arg_length);
-    h_sum_.resize(f_.nnzOut()*s_);
+    h_sum_.resize(f_.nnzOut()*s_*ss_);
 
     
      // Read in options
@@ -609,7 +613,7 @@ namespace casadi {
     // Compose and build the kernel
     cl::Program program(context_, kernelCode());
     try {
-      std::string options = ""; //-cl-fast-relaxed-math";
+      std::string options = "-cl-fast-relaxed-math"; //-cl-fast-relaxed-math";
       program.build(devices_, options.c_str());
     }  catch (cl::Error err) {
       std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
@@ -659,7 +663,9 @@ namespace casadi {
     code << "   float args_local[" << h_args_.size() << "];" << std::endl;
     code << "   float p[2];" << std::endl;
     code << "   float value;" << std::endl;
-    code << "   int j = get_global_id(0);" << std::endl;
+    code << "   int jj = get_global_id(0);" << std::endl;
+    code << "   int j = jj / " << ss_ << ";" << std::endl;
+    code << "   int jk = jj % " << ss_ << ";" << std::endl;
     code << "   for (int k=0;k<"<< h_args_.size() << ";++k) { args_local[k] = args[k]; }" << std::endl;
 
     code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
@@ -683,13 +689,18 @@ namespace casadi {
     }
     code << "   p[1] = j_offset + j;" << std::endl;
     code << "   for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]= 0; }" << std::endl;
-    code << "   for (int i=0;i<" << s_ << ";++i) {" << std::endl;  
+    std::stringstream ss;
+    ss << std::scientific << sfrac_;
+    code << "   int upper = (int) ceil((jk+1)*" << ss.str() << " );" << std::endl;
+    code << "   int lower = (int) ceil(jk*" << ss.str() << ");" << std::endl;
+    //code << "   printf(\"test%d  -- %d\\n\", lower, upper );" << std::endl;
+    code << "   for (int i=lower;i<upper;++i) {" << std::endl;  
     code << "     value = im_in[j*" << s_ <<" + i];" << std::endl;
     code << "     p[0] = i_offset + i;" << std::endl;
     code << "     F(arg,res,iw,w); " << std::endl;
     code << "     for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]+= res_local[k]; }" << std::endl;
     code << "   }" << std::endl;
-    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k) { sum_out[k+j*" << f_.nnzOut() << "] = sum[k]; }" << std::endl;
+    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k) { sum_out[k+jj*" << f_.nnzOut() << "] = sum[k]; }" << std::endl;
     code << "}   " << std::endl;     
     
     std::cout << code.str() << std::endl;
@@ -724,9 +735,6 @@ namespace casadi {
     int u = round(X[0]);
     int v = round(X[1]);
     int r = round(r_);
-  
-
-
 
     std::fill(h_im_.begin(), h_im_.end(), 0);
 
@@ -752,16 +760,18 @@ namespace casadi {
 
     tin =  getRealTime()-tin;
 
+    double tm =  getRealTime();
+
     try 
     {
     d_im_   = cl::Buffer(context_, begin(h_im_), end(h_im_), true);
-    d_sum_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s_);
+    d_sum_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s_*ss_);
     d_args_  = cl::Buffer(context_, begin(h_args_), end(h_args_), true);
 
     (*kernel_)(
         cl::EnqueueArgs(
             queue_,
-            cl::NDRange(s_)), 
+            cl::NDRange(s_*ss_)), 
         d_im_,
         d_sum_,
         d_args_,
@@ -781,12 +791,13 @@ namespace casadi {
        << std::endl;
 
     }
+      tm =  getRealTime()-tm;
     
       cl::copy(queue_, d_sum_, begin(h_sum_), end(h_sum_));
 
       double tout = getRealTime();
       kk=0;
-      for (int j=0;j<s_;++j) {
+      for (int j=0;j<s_*ss_;++j) {
         for (int i=0;i<f_.nOut();++i) {
           if (res[i]) {
             for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
@@ -800,8 +811,104 @@ namespace casadi {
       }
       tout =  getRealTime()-tout;
 
-    std::cout << "opencl kernelsum [ms]:" << (getRealTime()-t0)*1000 << " / in&out [ms] " << (tin+tout)*1000 << std::endl;
+    std::cout << "opencl kernelsum [ms]:" << (getRealTime()-t0)*1000 << " (" << tm*1000 << " gpu) ms / in [ms] " << (tin)*1000 <<  "/ out [ms]" << (tout)*1000 << std::endl;
 
+  }
+
+  void KernelSum2DOcl::generateDeclarations(CodeGenerator& g) const {
+    f_->addDependency(g);
+  }
+
+  void KernelSum2DOcl::generateBody(CodeGenerator& g) const {
+    /**
+    g.body << "  for (int i=0;i<" << f_.nOut() << ";++i) {" << std::endl;
+    g.body << "    if (res[i]) {" << std::endl;
+    g.body << "      for (int k=0;k<" << f_.outputSparsity(i).nnz() << ";++k) {" << std::endl;
+    g.body << "        res[i][k] = 0;" << std::endl;
+    g.body << "      }" << std::endl;
+    g.body << "    }" << std::endl;
+    g.body << "  }" << std::endl;
+                                
+    g.body << "  const double* V = arg[0];" << std::endl;
+    g.body << "  const double* X = arg[1];" << std::endl;
+
+    g.body << "  int u = round(X[0]);" << std::endl;
+    g.body << "  int v = round(X[1]);" << std::endl;
+    g.body << "  int r = round(r_);" << std::endl;
+
+    std::fill(h_im_.begin(), h_im_.end(), 0);
+
+    int j_offset = v-r;
+    int i_offset = u-r;
+
+    for (int j = max(v-r, 0); j<= min(v+r, size_.second-1); ++j) {
+      for (int i = max(u-r, 0); i<= min(u+r, size_.first-1); ++i) {
+        // Set the pixel value input
+        h_im_[(i-i_offset)+(j-j_offset)*s_] = V[i+j*size_.first];
+      }
+    }
+
+    int kk = 0;
+    for (int i=2;i<f_.nIn();++i) {
+      casadi_assert(arg[i-1]!=0);
+      for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+        h_args_[kk] = arg[i-1][k];
+        
+        kk++;
+      }
+    }
+
+    tin =  getRealTime()-tin;
+
+    double tm =  getRealTime();
+
+    try 
+    {
+    d_im_   = cl::Buffer(context_, begin(h_im_), end(h_im_), true);
+    d_sum_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s_*ss_);
+    d_args_  = cl::Buffer(context_, begin(h_args_), end(h_args_), true);
+
+    (*kernel_)(
+        cl::EnqueueArgs(
+            queue_,
+            cl::NDRange(s_*ss_)), 
+        d_im_,
+        d_sum_,
+        d_args_,
+        i_offset,
+        j_offset);
+
+    queue_.finish();
+      }
+      catch (cl::Error err) {
+    std::cout << "Exception\n";
+    std::cerr 
+        << "ERROR: "
+        << err.what()
+        << "("
+        << err.err()
+       << ")"
+       << std::endl;
+
+    }
+
+      cl::copy(queue_, d_sum_, begin(h_sum_), end(h_sum_));
+
+      double tout = getRealTime();
+      kk=0;
+      for (int j=0;j<s_*ss_;++j) {
+        for (int i=0;i<f_.nOut();++i) {
+          if (res[i]) {
+            for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+              res[i][k] += h_sum_[kk];
+              kk++;
+            }
+          } else {
+            kk += f_.outputSparsity(i).nnz();
+          }
+        }
+      }
+*/
   }
 
 } // namespace casadi

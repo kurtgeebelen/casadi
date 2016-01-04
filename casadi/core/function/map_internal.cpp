@@ -39,6 +39,8 @@ namespace casadi {
     // Read the type of parallelization
     Dict::const_iterator par_op = opts.find("parallelization");
 
+    std::cout << "hey" << reduce_inputs << ":" <<  reduce_outputs << std::endl;
+
     if (reduce_inputs || reduce_outputs) {
       // Vector indicating which inputs/outputs are to be repeated
       std::vector<bool> repeat_in(f.nIn(), true), repeat_out(f.nOut(), true);
@@ -705,17 +707,29 @@ namespace casadi {
     double t0 = getRealTime();
     double tin = getRealTime();
 
+    for (int i=0;i<f_.sz_arg();++i) {
+      std::cout << "arg " << i << ":" << arg[i] << std::endl;
+    }
+    for (int i=0;i<f_.sz_res();++i) {
+      std::cout << "res " << i << ":" << res[i] << std::endl;
+    }
+
     int kk=0;
     for (int j=0;j<n_;++j) {
       for (int i=0;i<f_.nIn();++i) {
-        for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
-          h_in_[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
-          kk++;
+        if (arg[i]) {
+          for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
+            h_in_[kk] = arg[i][k+j*f_.inputSparsity(i).nnz()];
+            kk++;
+          }
+        } else {
+          casadi_error("OOOOOOPS");
         }
       }
     }
     tin =  getRealTime()-tin;
 
+try {
     d_in_  = cl::Buffer(context_, begin(h_in_), end(h_in_), true);
     d_out_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*n_);
 
@@ -727,6 +741,19 @@ namespace casadi {
         d_out_);
 
     queue_.finish();
+      }
+      catch (cl::Error err) {
+        std::cout << "Exception\n";
+        std::cerr 
+            << "ERROR: "
+            << err.what()
+            << "("
+            << err.err()
+           << ")"
+           << std::endl;
+        casadi_error("woops");
+      }
+
 
       cl::copy(queue_, d_out_, begin(h_out_), end(h_out_));
 
@@ -734,9 +761,13 @@ namespace casadi {
       kk=0;
       for (int j=0;j<n_;++j) {
         for (int i=0;i<f_.nOut();++i) {
-          for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
-            res[i][k+j*f_.outputSparsity(i).nnz()] = h_out_[kk];
-            kk++;
+          if (res[i]) {
+            for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
+              res[i][k+j*f_.outputSparsity(i).nnz()] = h_out_[kk];
+              kk++;
+            }
+          } else {
+            kk+=f_.outputSparsity(i).nnz();
           }
         }
       }
@@ -793,7 +824,26 @@ namespace casadi {
     code << "   F(arg,res,iw,w); " << std::endl;
     code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k)" << std::endl;
     code << "     h_out[k+i*" << f_.nnzOut() << "] = h_out_local[k];" << std::endl;
+
+
+    std::cout << code.str() << std::endl;
+
+    printDimensions(std::cout);
+
+    f_.printDimensions(std::cout);
+    std::cout << f_.sz_arg() << std::endl;
+    std::cout << f_.sz_res() << std::endl;
+    std::cout << f_.sz_iw() << std::endl;
+    std::cout << f_.sz_w() << std::endl;
+
+    std::cout << "buffers " << h_in_.size() << " || " << h_out_.size() << std::endl;
+
     code << "}   " << std::endl;
+
+    /*std::ifstream ss("kernel.c");
+    std::stringstream buffer;
+    buffer << ss.rdbuf();
+    return buffer.str();*/
     return code.str();
   }
 
@@ -865,6 +915,7 @@ namespace casadi {
     Dict opts;
     opts["opencl"] = true;
     opts["meta"] = false;
+    opts["main"] = true;
 
     CodeGenerator cg(opts);
     cg.add(f_, "F");
@@ -890,7 +941,7 @@ namespace casadi {
     code << "     h_in_local[k] = h_in[k+i*" << nnz_in_ << "];" << std::endl;
     code << "   for (int k=0;k<"<< nnz_fixed_ << ";++k)" << std::endl;
     code << "     h_fixed_local[k] = h_fixed[k];" << std::endl;
-    code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
+    code << "   int iw[" << f_.sz_iw()  << "];" << std::endl;
     code << "   float w[" << f_.sz_w() << "];" << std::endl;
     code << "   const d* arg[" << f_.sz_arg() << "];" << std::endl;
     code << "   d* res[" << f_.sz_res() << "];" << std::endl;

@@ -28,6 +28,7 @@ import unittest
 from types import *
 from helpers import *
 
+@run_only(["KernelSum2D"])
 class Functiontests(casadiTestCase):
 
   def test_call_empty(self):

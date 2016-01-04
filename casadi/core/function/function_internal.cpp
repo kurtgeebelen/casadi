@@ -209,9 +209,11 @@ namespace casadi {
     if (evalD_) {
       double t0 = getRealTime();
       evalD_(arg, res, iw, w);
-      std::cout << "codegen [ms]:" << (getRealTime()-t0)*1000 << std::endl;
+      std::cout << name_ << " -- codegen [ms]:" << (getRealTime()-t0)*1000 << std::endl;
     } else {
+      double t0 = getRealTime();
       evalD(arg, res, iw, w);
+      std::cout << name_ << " -- normal [ms]:" << (getRealTime()-t0)*1000 << std::endl;
     }
   }
 
