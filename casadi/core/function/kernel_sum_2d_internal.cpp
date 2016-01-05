@@ -833,8 +833,7 @@ namespace casadi {
     g.setup << "  kernel_ = clCreateKernel(program, \"mykernel\", &err);" << std::endl;
     //casadi_assert_message(err == CL_SUCCESS, "CL error getting device name: " << err);
 
-    // NB: we copy the host pointers here too
-    g.setup << "  d_im_  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_a, &err);" << std::endl;
+
     checkError(err, "Creating buffer d_a");
     d_b  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_b, &err);
     checkError(err, "Creating buffer d_b");
@@ -853,6 +852,10 @@ namespace casadi {
 
 
     g.body << "  if (context_==0) jit_setup();" << std::endl;
+
+    // NB: we copy the host pointers here too
+    g.body << "  d_im_  = clCreateBuffer(context_,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_a, &err);" << std::endl;
+
     /**
     g.body << "  for (int i=0;i<" << f_.nOut() << ";++i) {" << std::endl;
     g.body << "    if (res[i]) {" << std::endl;
