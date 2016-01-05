@@ -31,9 +31,7 @@
 
 #ifdef WITH_OPENCL
 
-#define __CL_ENABLE_EXCEPTIONS
-
-#include "CL/cl.hpp"
+#include "CL/cl.h"
 
 // pick up device type from compiler command line or from the default type
 #ifndef DEVICE
@@ -175,19 +173,19 @@ namespace casadi {
     virtual std::string parallelization() const { return "opencl"; }
     
     /// Obtain code for the kernel
-    std::string kernelCode();
+    std::string kernelCode() const;
 
-    std::vector<cl::Device> devices_;
+    std::vector<cl_device_id> devices_;
 
-    cl::Context context_;
-
+    cl_context context_;
+/**
     cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer, int, int> *kernel_;
     cl::CommandQueue queue_;
 
     cl::Buffer d_im_;
     cl::Buffer d_args_;
     cl::Buffer d_sum_;
-
+*/
     std::vector< float > h_sum_;
     std::vector< float > h_args_;
     std::vector< float > h_im_;
@@ -199,6 +197,9 @@ namespace casadi {
     int ss_;
 
     double sfrac_;
+
+
+    std::vector<int> opencl_select_;
 
     /** \brief Generate code for the declarations of the C function */
     virtual void generateDeclarations(CodeGenerator& g) const;

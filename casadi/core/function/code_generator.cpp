@@ -267,6 +267,13 @@ namespace casadi {
       s << "#define c" << i << " CASADI_PREFIX(c" << i << ")" << endl;
     }
 
+    s << this->declarations.str() << std::endl;
+
+    // Setup code
+    s << "int jit_setup() {" << std::endl;
+    s << this->setup.str();
+    s << "}" << std::endl;
+
     // Codegen body
     s << this->body.str();
 
@@ -657,6 +664,17 @@ namespace casadi {
       << "real_t CASADI_PREFIX(sign)(real_t x) "
       << "{ return x<0 ? -1 : x>0 ? 1 : x;}" << endl
       << "#define sign(x) CASADI_PREFIX(sign)(x)" << endl << endl;
+  }
+
+  std::string CodeGenerator::multiline_string(const std::string & s) {
+    std::stringstream ss(s);
+    std::string to;
+    std::stringstream out(s);
+
+    while (std::getline(ss,to,'\n')){
+      out << "\"" << to << "\"" << endl;
+    }
+    return out.str();
   }
 
   std::string CodeGenerator::constant(double v) {

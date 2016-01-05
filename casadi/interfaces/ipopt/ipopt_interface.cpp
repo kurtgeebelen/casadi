@@ -416,8 +416,8 @@ namespace casadi {
         "grad_f", gradF_.operator->());
       profileWriteSourceLineDep(CasadiOptions::profilingLog, this, 2,
         "g", nlp_.operator->());
-      profileWriteSourceLineDep(CasadiOptions::profilingLog, this, 3,
-        "jac_g", this->jacG().operator->());
+      //profileWriteSourceLineDep(CasadiOptions::profilingLog, this, 3,
+      //  "jac_g", this->jacG().operator->());
       profileWriteSourceLineDep(CasadiOptions::profilingLog, this, 4,
         "h", hessLag_.isNull() ? 0 : hessLag_.operator->());
     }

@@ -584,59 +584,12 @@ namespace casadi {
     h_sum_.resize(f_.nnzOut()*s_*ss_);
 
     
-     // Read in options
-    std::vector<int> opencl_select = getOption("opencl_select");
-
-    // Construct a Platform to find available devices
-    cl::Platform platform;
-
-    std::vector<cl::Device> devices;
-    platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
-
-    if (verbose_) {
-      userOut() << "Available OpenCL devices" << std::endl;
-      for (int i=0;i<devices.size();++i) {
-        std::string name;
-        devices[i].getInfo(CL_DEVICE_NAME, &name);
-        userOut() << i << ":" << name << std::endl;
-      }
-    }
-
-    // Select the desired devices
-    for (int i=0;i<opencl_select.size();i++) {
-      devices_.push_back(devices.at(opencl_select[i]));
-    }
-
-    // Create a context
-    context_ = cl::Context(devices_);
-
-    // Compose and build the kernel
-    cl::Program program(context_, kernelCode());
-    try {
-      std::string options = "-cl-fast-relaxed-math"; //-cl-fast-relaxed-math";
-      program.build(devices_, options.c_str());
-    }  catch (cl::Error err) {
-      std::cerr << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices_[0]);
-      std::cerr 
-        << "ERROR: "
-        << err.what()
-        << "("
-        << err.err()
-       << ")"
-       << std::endl;
-      casadi_error("Opencl compilation failed");
-    }
-
-    // Create the kernel functor
-    kernel_ = new cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer, int, int>(program, "mykernel");
-
-    // Get the command queue
-    queue_ = cl::CommandQueue(context_);
-
+    // Read in options
+    opencl_select_ = getOption("opencl_select");
 
   }
   
-  std::string KernelSum2DOcl::kernelCode() {
+  std::string KernelSum2DOcl::kernelCode() const {
     std::stringstream code;
 
     Dict opts;
@@ -712,6 +665,7 @@ namespace casadi {
 
   void KernelSum2DOcl::evalD(const double** arg, double** res,
                                 int* iw, double* w) {
+/*
     double t0 = getRealTime();
 
 
@@ -811,7 +765,7 @@ namespace casadi {
       }
       tout =  getRealTime()-tout;
 
-    std::cout << "opencl kernelsum [ms]:" << (getRealTime()-t0)*1000 << " (" << tm*1000 << " gpu) ms / in [ms] " << (tin)*1000 <<  "/ out [ms]" << (tout)*1000 << std::endl;
+    std::cout << "opencl kernelsum [ms]:" << (getRealTime()-t0)*1000 << " (" << tm*1000 << " gpu) ms / in [ms] " << (tin)*1000 <<  "/ out [ms]" << (tout)*1000 << std::endl;*/
 
   }
 
@@ -820,6 +774,85 @@ namespace casadi {
   }
 
   void KernelSum2DOcl::generateBody(CodeGenerator& g) const {
+    g.addInclude("CL/cl.h");
+
+    g.declarations << "static cl_kernel kernel_ = 0;" << std::endl;
+    g.declarations << "static cl_command_queue commands_ = 0;" << std::endl;
+    g.declarations << "static cl_context context_ = 0;" << std::endl;
+    g.declarations << "static cl_mem d_im_ = 0;" << std::endl;
+    g.declarations << "static cl_mem d_sum_ = 0;" << std::endl;
+    g.declarations << "static cl_mem d_args_ = 0;" << std::endl;
+
+    g.setup << "  cl_uint numPlatforms;" << std::endl;
+    g.setup << "  int err = clGetPlatformIDs(0, NULL, &numPlatforms);" << std::endl;
+    g.setup << "  cl_platform_id Platform[numPlatforms];" << std::endl;
+    g.setup << "  err = clGetPlatformIDs(numPlatforms, Platform, NULL);" << std::endl;
+
+    //casadi_assert_message(err == CL_SUCCESS, "CL error during getting platforms: " << err);
+
+    g.setup << "  cl_device_id mydevices[" << opencl_select_.size() << "];"  << std::endl;
+
+    // Secure a GPU
+    g.setup << "  int i,j;" << std::endl;
+    g.setup << "  for (i = 0; i < numPlatforms; i++) {" << std::endl;
+    g.setup << "    cl_uint n = 0;" << std::endl;
+    g.setup << "    err = clGetDeviceIDs(Platform[i], CL_DEVICE_TYPE_ALL, 0, NULL, &n);" << std::endl;
+    g.setup << "    cl_device_id device_id[n];" << std::endl;
+    g.setup << "    err = clGetDeviceIDs(Platform[i], CL_DEVICE_TYPE_ALL, n, device_id, NULL);" << std::endl;
+    g.setup << "    mydevices[0] = device_id[0];" << std::endl;
+    g.setup << "    for (j=0;j<n;++j) {" << std::endl;
+    g.setup << "      cl_char device_name[1024] = {0};" << std::endl;
+    g.setup << "      err = clGetDeviceInfo( device_id[j],CL_DEVICE_NAME, sizeof(device_name), &device_name, NULL);" << std::endl;
+    g.setup << "    }" << std::endl;
+    g.setup << "}" << std::endl;
+
+
+    // Create a compute context 
+    g.setup << "  context_ = clCreateContext(0, 1, mydevices, NULL, NULL, &err);" << std::endl;
+    //casadi_assert_message(err == CL_SUCCESS, "CL error getting device name: " << err);
+
+    // Create a command queue
+    g.setup << "  commands_ = clCreateCommandQueue(context_, mydevices[0], 0, &err);" << std::endl;
+
+    g.setup << "  const char *KernelSource = " << g.multiline_string(kernelCode()) << ";" << std::endl;
+
+    // Create the compute program from the source buffer
+    g.setup << "  cl_program program = clCreateProgramWithSource(context_, 1, (const char **) & KernelSource, NULL, &err);" << std::endl;
+
+
+    // Build the program  
+    g.setup << "  err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);" << std::endl;
+    g.setup << "  if (err != CL_SUCCESS) {" << std::endl;
+    g.setup << "    size_t len;" << std::endl;
+    g.setup << "    char buffer[2048];" << std::endl;
+    g.setup << "    clGetProgramBuildInfo(program, mydevices[0], CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);" << std::endl;
+    g.setup << "  }" << std::endl;
+
+
+    // Create the compute kernel from the program 
+    g.setup << "  kernel_ = clCreateKernel(program, \"mykernel\", &err);" << std::endl;
+    //casadi_assert_message(err == CL_SUCCESS, "CL error getting device name: " << err);
+
+    // NB: we copy the host pointers here too
+    g.setup << "  d_im_  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_a, &err);" << std::endl;
+    checkError(err, "Creating buffer d_a");
+    d_b  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_b, &err);
+    checkError(err, "Creating buffer d_b");
+    d_e  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_e, &err);
+    checkError(err, "Creating buffer d_e");
+    d_g  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_g, &err);
+    checkError(err, "Creating buffer d_g");
+    
+    // Create the output arrays in device memory
+    d_c  = clCreateBuffer(context,  CL_MEM_READ_WRITE, dataSize, NULL, &err);
+    checkError(err, "Creating buffer d_c");
+    d_d  = clCreateBuffer(context,  CL_MEM_READ_WRITE, dataSize, NULL, &err);
+    checkError(err, "Creating buffer d_d");
+    d_f  = clCreateBuffer(context,  CL_MEM_WRITE_ONLY, dataSize, NULL, &err);
+    checkError(err, "Creating buffer d_f"); 
+
+
+    g.body << "  if (context_==0) jit_setup();" << std::endl;
     /**
     g.body << "  for (int i=0;i<" << f_.nOut() << ";++i) {" << std::endl;
     g.body << "    if (res[i]) {" << std::endl;
