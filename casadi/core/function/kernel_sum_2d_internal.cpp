@@ -575,17 +575,19 @@ namespace casadi {
 
     sfrac_ = double(s_)/ss_;
 
-    int arg_length = 0;
+    arg_length_ = 0;
     for (int i=2; i<num_in; ++i) {
-      arg_length+= f_.inputSparsity(i).nnz();
+      arg_length_+= f_.inputSparsity(i).nnz();
     }
 
-    h_args_.resize(arg_length);
+    h_args_.resize(arg_length_);
     h_sum_.resize(f_.nnzOut()*s_*ss_);
 
     
     // Read in options
     opencl_select_ = getOption("opencl_select");
+
+    //alloc_w(f_.sz_w() + nnz_out_+3 + sizeof(float)*(s_*s_+arg_length_+f_.nnzOut()*s_*ss_)/sizeof(double));
 
   }
   
@@ -611,49 +613,48 @@ namespace casadi {
     code << "   __global float* sum_out," << std::endl; 
     code << "   __global float* args," << std::endl;              
     code << "   int i_offset," << std::endl;  
-    code << "   int j_offset)" << std::endl; 
-    code << "{                            " << std::endl;
-    code << "   float args_local[" << h_args_.size() << "];" << std::endl;
-    code << "   float p[2];" << std::endl;
-    code << "   float value;" << std::endl;
-    code << "   int jj = get_global_id(0);" << std::endl;
-    code << "   int j = jj / " << ss_ << ";" << std::endl;
-    code << "   int jk = jj % " << ss_ << ";" << std::endl;
-    code << "   for (int k=0;k<"<< h_args_.size() << ";++k) { args_local[k] = args[k]; }" << std::endl;
+    code << "   int j_offset) {" << std::endl; 
 
-    code << "   int iw[" << f_.sz_iw() << "];" << std::endl;
-    code << "   float w[" << f_.sz_w() << "];" << std::endl;
-    code << "   float res_local[" << f_.nnzOut() << "];" << std::endl;
-    code << "   float sum[" << f_.nnzOut() << "];" << std::endl;
-    code << "   const d* arg[" << f_.sz_arg() << "];" << std::endl;
-    code << "   d* res[" << f_.sz_res() << "];" << std::endl;
-    code << "   arg[0] = p;arg[1]=&value;";
+    code << "  float args_local[" << h_args_.size() << "];" << std::endl;
+    code << "  float p[2];" << std::endl;
+    code << "  float value;" << std::endl;
+    code << "  int jj = get_global_id(0);" << std::endl;
+    code << "  int j = jj / " << ss_ << ";" << std::endl;
+    code << "  int jk = jj % " << ss_ << ";" << std::endl;
+    code << "  for (int k=0;k<"<< h_args_.size() << ";++k) { args_local[k] = args[k]; }" << std::endl;
+
+    code << "  int iw[" << f_.sz_iw() << "];" << std::endl;
+    code << "  float w[" << f_.sz_w() << "];" << std::endl;
+    code << "  float res_local[" << f_.nnzOut() << "];" << std::endl;
+    code << "  float sum[" << f_.nnzOut() << "];" << std::endl;
+    code << "  const d* arg[" << f_.sz_arg() << "];" << std::endl;
+    code << "  d* res[" << f_.sz_res() << "];" << std::endl;
+    code << "  arg[0] = p;arg[1]=&value;";
 
     int offset= 0;
     for (int i=2;i<f_.nIn();++i) {
-      code << "arg[" << i << "] = args_local+" << offset << ";" << std::endl;
+      code << "  arg[" << i << "] = args_local+" << offset << ";" << std::endl;
       offset+= f_.inputSparsity(i).nnz();
     }
 
     offset= 0;
     for (int i=0;i<f_.nOut();++i) {
-      code << "res[" << i << "] = res_local+" << offset << ";"  << std::endl;
+      code << "  res[" << i << "] = res_local+" << offset << ";"  << std::endl;
       offset+= f_.outputSparsity(i).nnz();
     }
-    code << "   p[1] = j_offset + j;" << std::endl;
-    code << "   for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]= 0; }" << std::endl;
+    code << "  p[1] = j_offset + j;" << std::endl;
+    code << "  for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]= 0; }" << std::endl;
     std::stringstream ss;
     ss << std::scientific << sfrac_;
-    code << "   int upper = (int) ceil((jk+1)*" << ss.str() << " );" << std::endl;
-    code << "   int lower = (int) ceil(jk*" << ss.str() << ");" << std::endl;
-    //code << "   printf(\"test%d  -- %d\\n\", lower, upper );" << std::endl;
-    code << "   for (int i=lower;i<upper;++i) {" << std::endl;  
-    code << "     value = im_in[j*" << s_ <<" + i];" << std::endl;
-    code << "     p[0] = i_offset + i;" << std::endl;
-    code << "     F(arg,res,iw,w); " << std::endl;
-    code << "     for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]+= res_local[k]; }" << std::endl;
-    code << "   }" << std::endl;
-    code << "   for (int k=0;k<"<< f_.nnzOut() << ";++k) { sum_out[k+jj*" << f_.nnzOut() << "] = sum[k]; }" << std::endl;
+    code << "  int upper = (int) ceil((jk+1)*" << ss.str() << " );" << std::endl;
+    code << "  int lower = (int) ceil(jk*" << ss.str() << ");" << std::endl;
+    code << "  for (int i=lower;i<upper;++i) {" << std::endl;  
+    code << "    value = im_in[j*" << s_ <<" + i];" << std::endl;
+    code << "    p[0] = i_offset + i;" << std::endl;
+    code << "    F(arg,res,iw,w); " << std::endl;
+    code << "    for (int k=0;k<" << f_.nnzOut() << ";++k) { sum[k]+= res_local[k]; }" << std::endl;
+    code << "  }" << std::endl;
+    code << "  for (int k=0;k<"<< f_.nnzOut() << ";++k) { sum_out[k+jj*" << f_.nnzOut() << "] = sum[k]; }" << std::endl;
     code << "}   " << std::endl;     
     
     std::cout << code.str() << std::endl;
@@ -663,110 +664,8 @@ namespace casadi {
     
   }
 
-  void KernelSum2DOcl::evalD(const double** arg, double** res,
-                                int* iw, double* w) {
-/*
-    double t0 = getRealTime();
-
-
-    double tin = getRealTime();
-                     
-                  
-    for (int i=0;i<f_.nOut();++i) {
-      if (res[i]) {
-        for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
-          res[i][k] = 0;
-        }
-      }
-    }            
-                                
-    const double* V = arg[0];
-    const double* X = arg[1];
-
-    //     ---> j,v
-    //   |
-    //   v  i,u
-    int u = round(X[0]);
-    int v = round(X[1]);
-    int r = round(r_);
-
-    std::fill(h_im_.begin(), h_im_.end(), 0);
-
-    int j_offset = v-r;
-    int i_offset = u-r;
-
-    for (int j = max(v-r, 0); j<= min(v+r, size_.second-1); ++j) {
-      for (int i = max(u-r, 0); i<= min(u+r, size_.first-1); ++i) {
-        // Set the pixel value input
-        h_im_[(i-i_offset)+(j-j_offset)*s_] = V[i+j*size_.first];
-      }
-    }
-
-    int kk = 0;
-    for (int i=2;i<f_.nIn();++i) {
-      casadi_assert(arg[i-1]!=0);
-      for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
-        h_args_[kk] = arg[i-1][k];
-        
-        kk++;
-      }
-    }
-
-    tin =  getRealTime()-tin;
-
-    double tm =  getRealTime();
-
-    try 
-    {
-    d_im_   = cl::Buffer(context_, begin(h_im_), end(h_im_), true);
-    d_sum_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s_*ss_);
-    d_args_  = cl::Buffer(context_, begin(h_args_), end(h_args_), true);
-
-    (*kernel_)(
-        cl::EnqueueArgs(
-            queue_,
-            cl::NDRange(s_*ss_)), 
-        d_im_,
-        d_sum_,
-        d_args_,
-        i_offset,
-        j_offset);
-
-    queue_.finish();
-      }
-      catch (cl::Error err) {
-    std::cout << "Exception\n";
-    std::cerr 
-        << "ERROR: "
-        << err.what()
-        << "("
-        << err.err()
-       << ")"
-       << std::endl;
-
-    }
-      tm =  getRealTime()-tm;
+  void KernelSum2DOcl::evalD(const double** arg, double** res, int* iw, double* w) {
     
-      cl::copy(queue_, d_sum_, begin(h_sum_), end(h_sum_));
-
-      double tout = getRealTime();
-      kk=0;
-      for (int j=0;j<s_*ss_;++j) {
-        for (int i=0;i<f_.nOut();++i) {
-          if (res[i]) {
-            for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
-              res[i][k] += h_sum_[kk];
-              kk++;
-            }
-          } else {
-            kk += f_.outputSparsity(i).nnz();
-          }
-        }
-      }
-      tout =  getRealTime()-tout;
-
-    std::cout << "opencl kernelsum [ms]:" << (getRealTime()-t0)*1000 << " (" << tm*1000 << " gpu) ms / in [ms] " << (tin)*1000 <<  "/ out [ms]" << (tout)*1000 << std::endl;*/
-
   }
 
   void KernelSum2DOcl::generateDeclarations(CodeGenerator& g) const {
@@ -775,6 +674,7 @@ namespace casadi {
 
   void KernelSum2DOcl::generateBody(CodeGenerator& g) const {
     g.addInclude("CL/cl.h");
+    g.addInclude("stdio.h");
 
     g.declarations << "static cl_kernel kernel_ = 0;" << std::endl;
     g.declarations << "static cl_command_queue commands_ = 0;" << std::endl;
@@ -782,6 +682,13 @@ namespace casadi {
     g.declarations << "static cl_mem d_im_ = 0;" << std::endl;
     g.declarations << "static cl_mem d_sum_ = 0;" << std::endl;
     g.declarations << "static cl_mem d_args_ = 0;" << std::endl;
+    // NB: we copy the host pointers here too
+    g.declarations << "static float h_args_[" <<  arg_length_ << "];" << std::endl;
+    g.declarations << "static float h_im_[" << s_*s_ << "];" << std::endl;
+    g.declarations << "static float h_sum_["   << f_.nnzOut()*s_*ss_  << "];" << std::endl;
+    g.declarations << "#define MIN(a,b) (((a)<(b))?(a):(b))" << std::endl;
+    g.declarations << "#define MAX(a,b) (((a)>(b))?(a):(b))" << std::endl;
+    g.declarations << "#define check_cl_error(a) if ((a) != CL_SUCCESS) {  printf(\"exit code '%d' in '%s' on line %d\\n\",a, __FILE__,__LINE__);exit(a);}" << std::endl;
 
     g.setup << "  cl_uint numPlatforms;" << std::endl;
     g.setup << "  int err = clGetPlatformIDs(0, NULL, &numPlatforms);" << std::endl;
@@ -797,12 +704,16 @@ namespace casadi {
     g.setup << "  for (i = 0; i < numPlatforms; i++) {" << std::endl;
     g.setup << "    cl_uint n = 0;" << std::endl;
     g.setup << "    err = clGetDeviceIDs(Platform[i], CL_DEVICE_TYPE_ALL, 0, NULL, &n);" << std::endl;
+    g.setup << "    check_cl_error(err);" << std::endl;
     g.setup << "    cl_device_id device_id[n];" << std::endl;
     g.setup << "    err = clGetDeviceIDs(Platform[i], CL_DEVICE_TYPE_ALL, n, device_id, NULL);" << std::endl;
+    g.setup << "    check_cl_error(err);" << std::endl;
     g.setup << "    mydevices[0] = device_id[0];" << std::endl;
     g.setup << "    for (j=0;j<n;++j) {" << std::endl;
     g.setup << "      cl_char device_name[1024] = {0};" << std::endl;
     g.setup << "      err = clGetDeviceInfo( device_id[j],CL_DEVICE_NAME, sizeof(device_name), &device_name, NULL);" << std::endl;
+    g.setup << "      check_cl_error(err);" << std::endl;
+    g.setup << "      printf(\"Detected device: %s\\n\",device_name);" << std::endl;
     g.setup << "    }" << std::endl;
     g.setup << "}" << std::endl;
 
@@ -814,7 +725,7 @@ namespace casadi {
     // Create a command queue
     g.setup << "  commands_ = clCreateCommandQueue(context_, mydevices[0], 0, &err);" << std::endl;
 
-    g.setup << "  const char *KernelSource = " << g.multiline_string(kernelCode()) << ";" << std::endl;
+    g.setup << "  const char *KernelSource = " << g.multiline_string(kernelCode()+"\n") << ";" << std::endl;
 
     // Create the compute program from the source buffer
     g.setup << "  cl_program program = clCreateProgramWithSource(context_, 1, (const char **) & KernelSource, NULL, &err);" << std::endl;
@@ -824,127 +735,101 @@ namespace casadi {
     g.setup << "  err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);" << std::endl;
     g.setup << "  if (err != CL_SUCCESS) {" << std::endl;
     g.setup << "    size_t len;" << std::endl;
-    g.setup << "    char buffer[2048];" << std::endl;
+    g.setup << "    char buffer[200048];" << std::endl;
     g.setup << "    clGetProgramBuildInfo(program, mydevices[0], CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);" << std::endl;
+    g.setup << "    printf(\"%s\\n\", buffer);" << std::endl;
+    g.setup << "    check_cl_error(err);" << std::endl;
     g.setup << "  }" << std::endl;
 
 
     // Create the compute kernel from the program 
     g.setup << "  kernel_ = clCreateKernel(program, \"mykernel\", &err);" << std::endl;
-    //casadi_assert_message(err == CL_SUCCESS, "CL error getting device name: " << err);
+    g.setup << "  check_cl_error(err);" << std::endl;
 
-
-    checkError(err, "Creating buffer d_a");
-    d_b  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_b, &err);
-    checkError(err, "Creating buffer d_b");
-    d_e  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_e, &err);
-    checkError(err, "Creating buffer d_e");
-    d_g  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_g, &err);
-    checkError(err, "Creating buffer d_g");
-    
-    // Create the output arrays in device memory
-    d_c  = clCreateBuffer(context,  CL_MEM_READ_WRITE, dataSize, NULL, &err);
-    checkError(err, "Creating buffer d_c");
-    d_d  = clCreateBuffer(context,  CL_MEM_READ_WRITE, dataSize, NULL, &err);
-    checkError(err, "Creating buffer d_d");
-    d_f  = clCreateBuffer(context,  CL_MEM_WRITE_ONLY, dataSize, NULL, &err);
-    checkError(err, "Creating buffer d_f"); 
-
+    g.body << "  int i,j,k;" << std::endl;
 
     g.body << "  if (context_==0) jit_setup();" << std::endl;
+    g.body << "  int i_offset;" << std::endl;
+    g.body << "  int j_offset;" << std::endl;
+    g.body << "  size_t global = " << s_*ss_ << ";" << std::endl;
 
-    // NB: we copy the host pointers here too
-    g.body << "  d_im_  = clCreateBuffer(context_,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  dataSize, h_a, &err);" << std::endl;
-
-    /**
-    g.body << "  for (int i=0;i<" << f_.nOut() << ";++i) {" << std::endl;
-    g.body << "    if (res[i]) {" << std::endl;
-    g.body << "      for (int k=0;k<" << f_.outputSparsity(i).nnz() << ";++k) {" << std::endl;
-    g.body << "        res[i][k] = 0;" << std::endl;
-    g.body << "      }" << std::endl;
-    g.body << "    }" << std::endl;
-    g.body << "  }" << std::endl;
+    for (int i=0;i<f_.nOut();++i) {
+      g.body << "    if (res[" << i << "]) {" << std::endl;
+      g.body << "      for (k=0;k<" << f_.outputSparsity(i).nnz() << ";++k) {" << std::endl;
+      g.body << "        res[" << i << "][k] = 0;" << std::endl;
+      g.body << "      }" << std::endl;
+      g.body << "    }" << std::endl;
+    }
                                 
-    g.body << "  const double* V = arg[0];" << std::endl;
-    g.body << "  const double* X = arg[1];" << std::endl;
+    g.body << "  const real_t* V = arg[0];" << std::endl;
+    g.body << "  const real_t* X = arg[1];" << std::endl;
 
     g.body << "  int u = round(X[0]);" << std::endl;
     g.body << "  int v = round(X[1]);" << std::endl;
-    g.body << "  int r = round(r_);" << std::endl;
+    g.body << "  int r = round(" << r_ << ");" << std::endl;
 
-    std::fill(h_im_.begin(), h_im_.end(), 0);
+    g.body << "  for (i =0;i<" << s_*s_ << ";++i) h_im_[i] = 0;" << std::endl;
 
-    int j_offset = v-r;
-    int i_offset = u-r;
+    g.body << "  j_offset = v-r;" << std::endl;
+    g.body << "  i_offset = u-r;" << std::endl;
 
-    for (int j = max(v-r, 0); j<= min(v+r, size_.second-1); ++j) {
-      for (int i = max(u-r, 0); i<= min(u+r, size_.first-1); ++i) {
-        // Set the pixel value input
-        h_im_[(i-i_offset)+(j-j_offset)*s_] = V[i+j*size_.first];
-      }
-    }
+    g.body << "  for (j = MAX(v-r, 0); j<= MIN(v+r, " << size_.second-1 << "); ++j) {" << std::endl;
+    g.body << "    for (i = MAX(u-r, 0); i<= MIN(u+r, " <<  size_.first-1 << "); ++i) {" << std::endl;
 
-    int kk = 0;
+    // Set the pixel value input
+    g.body << "      h_im_[(i-i_offset)+(j-j_offset)*" << s_ << "] = V[i+j*" << size_.first << "];" << std::endl;
+    g.body << "    }" << std::endl;
+    g.body << "  }" << std::endl;
+
+    g.body << "  int kk = 0;" << std::endl;
     for (int i=2;i<f_.nIn();++i) {
-      casadi_assert(arg[i-1]!=0);
-      for (int k=0;k<f_.inputSparsity(i).nnz();++k) {
-        h_args_[kk] = arg[i-1][k];
-        
-        kk++;
-      }
+      g.body << "  for (k=0;k<" << f_.inputSparsity(i).nnz() << ";++k) {" << std::endl;
+      g.body << "    h_args_[kk] = arg[" << i-1 << "][k];" << std::endl;
+      g.body << "    kk++;" << std::endl;
+      g.body << "  }" << std::endl;
     }
 
-    tin =  getRealTime()-tin;
+    g.body << "  int err;" << std::endl;
+    // NB: we copy the host pointers here too
+    g.body << "  d_args_  = clCreateBuffer(context_,  CL_MEM_READ_ONLY, sizeof(float)*" <<  arg_length_ << ", NULL, &err);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
+    g.body << "  d_im_    = clCreateBuffer(context_,  CL_MEM_READ_ONLY, sizeof(float)*" << s_*s_ << ", NULL, &err);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
+    g.body << "  d_sum_   = clCreateBuffer(context_,  CL_MEM_WRITE_ONLY, sizeof(float)*" << f_.nnzOut()*s_*ss_ << ", NULL, &err);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
 
-    double tm =  getRealTime();
+    g.body << "  err = clEnqueueWriteBuffer(commands_, d_args_, CL_TRUE, 0, sizeof(float) * " << arg_length_ << ",h_args_, 0, NULL, NULL);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
+    g.body << "  err = clEnqueueWriteBuffer(commands_, d_im_, CL_TRUE, 0, sizeof(float) * " << s_*s_ << ",h_im_, 0, NULL, NULL);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
 
-    try 
-    {
-    d_im_   = cl::Buffer(context_, begin(h_im_), end(h_im_), true);
-    d_sum_ = cl::Buffer(context_, CL_MEM_WRITE_ONLY, sizeof(float) *f_.nnzOut()*s_*ss_);
-    d_args_  = cl::Buffer(context_, begin(h_args_), end(h_args_), true);
+    g.body << "  err   = clSetKernelArg(kernel_, 0, sizeof(cl_mem), &d_im_);" << std::endl;
+    g.body << "  err  |= clSetKernelArg(kernel_, 1, sizeof(cl_mem), &d_sum_);" << std::endl;
+    g.body << "  err  |= clSetKernelArg(kernel_, 2, sizeof(cl_mem), &d_args_);" << std::endl;
+    g.body << "  err  |= clSetKernelArg(kernel_, 3, sizeof(int), &i_offset);" << std::endl;
+    g.body << "  err  |= clSetKernelArg(kernel_, 4, sizeof(int), &j_offset);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
 
-    (*kernel_)(
-        cl::EnqueueArgs(
-            queue_,
-            cl::NDRange(s_*ss_)), 
-        d_im_,
-        d_sum_,
-        d_args_,
-        i_offset,
-        j_offset);
-
-    queue_.finish();
+    g.body << "  err = clEnqueueNDRangeKernel(commands_, kernel_, 1, NULL, &global, NULL, 0, NULL, NULL);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
+    g.body << "  err = clFinish(commands_);" << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
+    g.body << "  err = clEnqueueReadBuffer( commands_, d_sum_, CL_TRUE, 0, " << sizeof(float) * (f_.nnzOut()*s_*ss_) << ", h_sum_, 0, NULL, NULL ); " << std::endl;
+    g.body << "  check_cl_error(err);" << std::endl;
+    double tout = getRealTime();
+    g.body << "  kk = 0;" << std::endl;
+    g.body << "  for (j=0;j<" << s_*ss_ << ";++j) {" << std::endl;
+      for (int i=0;i<f_.nOut();++i) {
+        g.body << "    if (res[" << i << "]) {" <<std::endl;
+        g.body << "      for (k=0;k<" << f_.outputSparsity(i).nnz() << ";++k) {" <<std::endl;
+        g.body << "        res[" << i << "][k] += h_sum_[kk];" <<std::endl;
+        g.body << "        kk++;" <<std::endl;
+        g.body << "      }" <<std::endl;
+        g.body << "    } else {" <<std::endl;
+        g.body << "      kk += " << f_.outputSparsity(i).nnz() << ";"<< std::endl;
+        g.body << "  }" <<std::endl;
       }
-      catch (cl::Error err) {
-    std::cout << "Exception\n";
-    std::cerr 
-        << "ERROR: "
-        << err.what()
-        << "("
-        << err.err()
-       << ")"
-       << std::endl;
-
-    }
-
-      cl::copy(queue_, d_sum_, begin(h_sum_), end(h_sum_));
-
-      double tout = getRealTime();
-      kk=0;
-      for (int j=0;j<s_*ss_;++j) {
-        for (int i=0;i<f_.nOut();++i) {
-          if (res[i]) {
-            for (int k=0;k<f_.outputSparsity(i).nnz();++k) {
-              res[i][k] += h_sum_[kk];
-              kk++;
-            }
-          } else {
-            kk += f_.outputSparsity(i).nnz();
-          }
-        }
-      }
-*/
+   g.body << "  }" <<std::endl;
   }
 
 } // namespace casadi

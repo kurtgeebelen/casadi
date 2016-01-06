@@ -227,7 +227,7 @@ namespace casadi {
     // Generate main
     if (this->main) {
       s[0] << "int main(int argc, char* argv[]) {" << endl
-           << "  return main_eval(argc, argv);" << endl
+           << "  return main_" << sname << "(argc, argv);" << endl
            << "}" << endl << endl;
     }
 
@@ -672,7 +672,7 @@ namespace casadi {
     std::stringstream out(s);
 
     while (std::getline(ss,to,'\n')){
-      out << "\"" << to << "\"" << endl;
+      out << "\"" << to << "\\n\"" << endl;
     }
     return out.str();
   }

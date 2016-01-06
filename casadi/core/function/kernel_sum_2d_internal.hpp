@@ -197,6 +197,7 @@ namespace casadi {
     int ss_;
 
     double sfrac_;
+    int arg_length_;
 
 
     std::vector<int> opencl_select_;

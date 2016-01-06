@@ -2042,6 +2042,7 @@ namespace casadi {
 
     // Add standard math
     g.addInclude("math.h");
+    g.addInclude("sys/time.h");
 
     // Add auxiliaries. TODO: Only add the auxiliaries that are actually used
     g.addAuxiliary(CodeGenerator::AUX_SQ);
@@ -2292,23 +2293,23 @@ namespace casadi {
              << "  real_t w[" << nr << "];" << endl;
 
       // Input buffers
-      s << "  const real_t* arg[" << n_in << "] = {";
+      s << "  const real_t* arg[" << sz_arg() << "];" << std::endl;
       int off=0;
       for (int i=0; i<n_in; ++i) {
-        if (i!=0) s << ", ";
-        s << g.work(off, input(i).nnz());
+        s << "arg[" << i << "] = ";
+        s << "w+" << off;
         off += input(i).nnz();
+        s << ";" << std::endl;
       }
-      s << "};" << endl;
 
       // Output buffers
-      s << "  real_t* res[" << n_out << "] = {";
+      s << "  real_t* res[" << sz_res() <<  "];" << std::endl;
       for (int i=0; i<n_out; ++i) {
-        if (i!=0) s << ", ";
-        s << g.work(off, output(i).nnz());
+        s << "res[" << i << "] = ";
+        s << "w+" << off;
         off += output(i).nnz();
+        s << ";" << std::endl;
       }
-      s << "};" << endl;
 
       // TODO(@jaeandersson): Read inputs from file. For now; read from stdin
       s << "  int j;" << endl
@@ -2316,9 +2317,22 @@ namespace casadi {
              << "  for (j=0; j<" << nnzIn() << "; ++j) "
              << "scanf(\"%lf\", a++);" << endl;
 
+      s << "  struct timeval time;" << endl;
+      s << "gettimeofday( &time, 0 );" << endl;
+      s << "long cur_time = 1000000 * time.tv_sec + time.tv_usec;" << endl;
+      s << "double sec = cur_time / 1000000.0;" << endl;
+
+
+
+
       // Call the function
-      s << "  int flag = eval(arg, res, iw, w+" << off << ");" << endl
+      s << "  int flag = " << fname << "(arg, res, iw, w+" << off << ");" << endl
              << "  if (flag) return flag;" << endl;
+
+      s << "gettimeofday( &time, 0 );" << endl;
+      s << "cur_time = 1000000 * time.tv_sec + time.tv_usec;" << endl;
+      s << "sec = cur_time / 1000000.0 - sec;" << endl;
+      s << "printf(\"eval: %f [ms]\\n\", sec*1000);" << endl;
 
       // TODO(@jaeandersson): Write outputs to file. For now: print to stdout
       s << "  const real_t* r = w+" << nnzIn() << ";" << endl

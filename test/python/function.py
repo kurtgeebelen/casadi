@@ -1910,8 +1910,13 @@ class Functiontests(casadiTestCase):
 
     f = SXFunction("f",[p,v,x],[v**2*exp(-r**2)/pi])
 
-    for p in ["serial","opencl"]:
-      F = KernelSum2D("test",f,(n,m),4,1,{"ad_weight": 1,"parallelization": p})
+
+    options_fasteval = {"compiler": "shell", "jit": True, "jit_options": {"compiler": "gcc","flags": ["-O3","-ffast-math","-lOpenCL"]}}
+
+    for p,options in [("serial",{}),("opencl",options_fasteval)]:
+      opts = {"ad_weight": 1,"parallelization": p}
+      opts.update(options)
+      F = KernelSum2D("test",f,(n,m),4,1,opts)
 
       x0 = DMatrix([n/2,m/2])
 
